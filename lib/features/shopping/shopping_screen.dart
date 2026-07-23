@@ -3,7 +3,11 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../core/constants/shopping_categories.dart';
+import 'default_product_suggestions.dart';
+import 'product_suggestion.dart';
 import 'shopping_item.dart';
+import 'shopping_list.dart';
+import 'shopping_lists_screen.dart';
 import 'shopping_service.dart';
 import 'widgets/frequent_items.dart';
 import 'widgets/section_title.dart';
@@ -20,72 +24,165 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
   final ShoppingService _service = ShoppingService();
   final TextEditingController _searchController = TextEditingController();
 
-  static const List<_ProductSuggestion> _productSuggestions = [
-    _ProductSuggestion('🥛', 'Milch', 'Milch'),
-    _ProductSuggestion('🌾', 'Hafermilch', 'Milch'),
-    _ProductSuggestion('🌰', 'Mandelmilch', 'Milch'),
-    _ProductSuggestion('🥛', 'Laktosefreie Milch', 'Milch'),
-    _ProductSuggestion('🧈', 'Butter', 'Milch'),
-    _ProductSuggestion('🥣', 'Joghurt', 'Milch'),
-    _ProductSuggestion('🧀', 'Käse', 'Milch'),
-    _ProductSuggestion('🥚', 'Eier', 'Milch'),
-    _ProductSuggestion('🍞', 'Brot', 'Backwaren'),
-    _ProductSuggestion('🥯', 'Brötchen', 'Backwaren'),
-    _ProductSuggestion('🍞', 'Toast', 'Backwaren'),
-    _ProductSuggestion('🍗', 'Hähnchen', 'Fleisch'),
-    _ProductSuggestion('🥩', 'Hackfleisch', 'Fleisch'),
-    _ProductSuggestion('🐟', 'Lachs', 'Fisch'),
-    _ProductSuggestion('🍅', 'Tomaten', 'Gemüse'),
-    _ProductSuggestion('🥒', 'Gurke', 'Gemüse'),
-    _ProductSuggestion('🫑', 'Paprika', 'Gemüse'),
-    _ProductSuggestion('🥔', 'Kartoffeln', 'Gemüse'),
-    _ProductSuggestion('🍌', 'Bananen', 'Obst'),
-    _ProductSuggestion('🍎', 'Äpfel', 'Obst'),
-    _ProductSuggestion('💧', 'Wasser', 'Getränke'),
-    _ProductSuggestion('🥤', 'Cola', 'Getränke'),
-    _ProductSuggestion('🍝', 'Nudeln', 'Nudeln'),
-    _ProductSuggestion('🍚', 'Reis', 'Nudeln'),
-    _ProductSuggestion('🍫', 'Schokolade', 'Süßigkeiten'),
-    _ProductSuggestion('🍨', 'Eis', 'Tiefkühl'),
-    _ProductSuggestion('🧻', 'Toilettenpapier', 'Haushalt'),
-    _ProductSuggestion('🧽', 'Spülmittel', 'Haushalt'),
-    _ProductSuggestion('🧴', 'Shampoo', 'Drogerie'),
-  ];
+  List<ShoppingList> _lists = [];
+  List<ShoppingItem> _items = [];
 
-  List<ShoppingItem> items = [];
-  String search = '';
-  String? selectedCategory;
+  String? _selectedListId;
+  String _search = '';
+  String? _selectedCategory;
+
+  bool _isLoading = true;
+  bool _isSaving = false;
+
+  ShoppingList? get _selectedList {
+    final selectedListId = _selectedListId;
+
+    if (selectedListId == null) {
+      return null;
+    }
+
+    for (final list in _lists) {
+      if (list.id == selectedListId) {
+        return list;
+      }
+    }
+
+    return null;
+  }
 
   @override
   void initState() {
     super.initState();
-    _loadItems();
 
-    _searchController.addListener(() {
-      setState(() {
-        search = _searchController.text.toLowerCase();
-      });
-    });
+    _searchController.addListener(_handleSearchChanged);
+    _loadLists();
   }
 
   @override
   void dispose() {
-    _searchController.dispose();
+    _searchController
+      ..removeListener(_handleSearchChanged)
+      ..dispose();
+
     super.dispose();
   }
 
-  Future<void> _loadItems() async {
-    final loadedItems = await _service.loadItems();
-
+  void _handleSearchChanged() {
     if (!mounted) return;
 
     setState(() {
-      items = loadedItems;
+      _search = _searchController.text.trim().toLowerCase();
+    });
+  }
+
+  Future<void> _loadLists({
+    String? preferredListId,
+  }) async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    final loadedLists = await _service.loadLists();
+
+    if (!mounted) return;
+
+    String? nextListId = preferredListId ?? _selectedListId;
+
+    final containsSelectedList = loadedLists.any(
+          (list) => list.id == nextListId,
+    );
+
+    if (!containsSelectedList) {
+      nextListId = loadedLists.isEmpty ? null : loadedLists.first.id;
+    }
+
+    final selectedList = loadedLists
+        .where((list) => list.id == nextListId)
+        .cast<ShoppingList?>()
+        .firstOrNull;
+
+    setState(() {
+      _lists = loadedLists;
+      _selectedListId = nextListId;
+      _items = selectedList == null
+          ? []
+          : List<ShoppingItem>.from(selectedList.items);
+      _selectedCategory = null;
+      _sortItems();
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _selectList(String? listId) async {
+    if (listId == null || listId == _selectedListId) {
+      return;
+    }
+
+    final list = _lists.where((entry) => entry.id == listId).firstOrNull;
+
+    if (list == null) {
+      return;
+    }
+
+    setState(() {
+      _selectedListId = list.id;
+      _items = List<ShoppingItem>.from(list.items);
+      _selectedCategory = null;
       _sortItems();
     });
   }
 
-  Future<void> _saveItems() => _service.saveItems(items);
+  Future<void> _saveItems() async {
+    final selectedListId = _selectedListId;
+
+    if (selectedListId == null || _isSaving) {
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    try {
+      final lists = await _service.loadLists();
+      final index = lists.indexWhere(
+            (list) => list.id == selectedListId,
+      );
+
+      if (index == -1) {
+        return;
+      }
+
+      lists[index].items = List<ShoppingItem>.from(_items);
+      await _service.saveLists(lists);
+
+      if (!mounted) return;
+
+      setState(() {
+        _lists = lists;
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _openListManagement() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const ShoppingListsScreen(),
+      ),
+    );
+
+    if (!mounted) return;
+
+    await _loadLists(
+      preferredListId: _selectedListId,
+    );
+  }
 
   String _generateId() {
     final random = math.Random();
@@ -97,7 +194,10 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
   List<String> get _categories {
     final categories = <String>[
       ...ShoppingCategories.categories,
-      ...items.map((item) => item.category),
+      ..._items.map((item) => item.category),
+      ...defaultProductSuggestions.map(
+            (suggestion) => suggestion.category,
+      ),
       'Sonstiges',
     ];
 
@@ -114,9 +214,12 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
   }
 
   void _sortItems() {
-    items.sort((a, b) {
-      final categoryComparison =
-      _categoryIndex(a.category).compareTo(_categoryIndex(b.category));
+    _items.sort((a, b) {
+      final categoryComparison = _categoryIndex(
+        a.category,
+      ).compareTo(
+        _categoryIndex(b.category),
+      );
 
       if (categoryComparison != 0) {
         return categoryComparison;
@@ -126,7 +229,9 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
         return a.favorite ? -1 : 1;
       }
 
-      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      return a.name.toLowerCase().compareTo(
+        b.name.toLowerCase(),
+      );
     });
   }
 
@@ -138,42 +243,54 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
     return quantity.toString().replaceAll('.', ',');
   }
 
-  String _categoryFromKeyword(String keyword) {
-    final normalizedKeyword = keyword.toLowerCase();
-
-    return _categories.firstWhere(
-          (category) => category.toLowerCase().contains(normalizedKeyword),
-      orElse: () => 'Sonstiges',
-    );
-  }
-
-  String _categoryForSuggestion(_ProductSuggestion suggestion) {
-    return _categoryFromKeyword(suggestion.categoryKeyword);
-  }
-
-  List<_ProductSuggestion> _matchingSuggestions(String query) {
+  List<ProductSuggestion> _matchingSuggestions(String query) {
     final normalizedQuery = query.trim().toLowerCase();
 
     if (normalizedQuery.isEmpty) {
       return [];
     }
 
-    return _productSuggestions
+    return defaultProductSuggestions
         .where(
-          (suggestion) =>
-          suggestion.name.toLowerCase().contains(normalizedQuery),
+          (suggestion) => suggestion.name
+          .toLowerCase()
+          .contains(normalizedQuery),
     )
         .take(6)
         .toList();
+  }
+
+  ProductSuggestion? _suggestionForName(String name) {
+    final normalizedName = name.trim().toLowerCase();
+
+    for (final suggestion in defaultProductSuggestions) {
+      if (suggestion.name.toLowerCase() == normalizedName) {
+        return suggestion;
+      }
+    }
+
+    return null;
   }
 
   void _showItemDialog({
     String initialName = '',
     ShoppingItem? item,
   }) {
+    if (_selectedList == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Erstelle zuerst eine Einkaufsliste.',
+          ),
+        ),
+      );
+      return;
+    }
+
     var query = item?.name ?? initialName;
     var selectedProduct = item?.name;
-    var dialogCategory = item?.category ?? selectedCategory ?? 'Sonstiges';
+    var dialogCategory =
+        item?.category ?? _selectedCategory ?? 'Sonstiges';
     var dialogUnit = item?.unit ?? 'Stk.';
     var quantity = _formatQuantity(item?.quantity ?? 1);
     var note = item?.note ?? '';
@@ -192,7 +309,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
       'Flasche',
     ];
 
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       enableDrag: false,
@@ -202,17 +319,25 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
           builder: (context, setSheetState) {
             final suggestions = _matchingSuggestions(query);
             final mediaQuery = MediaQuery.of(context);
+
             final availableHeight = math.max(
               300.0,
-              mediaQuery.size.height - mediaQuery.viewInsets.bottom - 24,
+              mediaQuery.size.height -
+                  mediaQuery.viewInsets.bottom -
+                  mediaQuery.padding.top -
+                  24,
             );
 
             return Padding(
-              padding: EdgeInsets.only(bottom: mediaQuery.viewInsets.bottom),
+              padding: EdgeInsets.only(
+                bottom: mediaQuery.viewInsets.bottom,
+              ),
               child: SafeArea(
                 top: false,
                 child: Container(
-                  constraints: BoxConstraints(maxHeight: availableHeight),
+                  constraints: BoxConstraints(
+                    maxHeight: availableHeight,
+                  ),
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surface,
                     borderRadius: const BorderRadius.vertical(
@@ -220,7 +345,12 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                     ),
                   ),
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                    padding: const EdgeInsets.fromLTRB(
+                      20,
+                      12,
+                      20,
+                      24,
+                    ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -228,8 +358,11 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                           width: 44,
                           height: 4,
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.outline,
-                            borderRadius: BorderRadius.circular(10),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .outline,
+                            borderRadius:
+                            BorderRadius.circular(10),
                           ),
                         ),
                         const SizedBox(height: 20),
@@ -242,7 +375,9 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                                     : showDetails
                                     ? 'Details festlegen'
                                     : 'Artikel hinzufügen',
-                                style: Theme.of(context).textTheme.headlineSmall,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall,
                               ),
                             ),
                             IconButton(
@@ -254,13 +389,29 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                             ),
                           ],
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Chip(
+                            avatar: const Icon(
+                              Icons.list_alt,
+                              size: 18,
+                            ),
+                            label: Text(
+                              'Liste: ${_selectedList!.name}',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         if (!showDetails) ...[
                           TextFormField(
-                            key: const ValueKey('product-search'),
+                            key: const ValueKey(
+                              'product-search',
+                            ),
                             initialValue: query,
                             autofocus: true,
-                            textCapitalization: TextCapitalization.sentences,
+                            textCapitalization:
+                            TextCapitalization.sentences,
                             decoration: const InputDecoration(
                               labelText: 'Artikel suchen',
                               hintText: 'z. B. Milch',
@@ -275,20 +426,24 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                           const SizedBox(height: 18),
                           if (query.trim().isEmpty)
                             const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 24),
+                              padding: EdgeInsets.symmetric(
+                                vertical: 24,
+                              ),
                               child: Text(
-                                'Gib einen Artikelnamen ein, um passende '
-                                    'Produkte zu sehen.',
+                                'Gib einen Artikelnamen ein, '
+                                    'um passende Produkte zu sehen.',
                                 textAlign: TextAlign.center,
                               ),
                             )
                           else if (suggestions.isEmpty)
                             Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 24),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 24,
+                              ),
                               child: Text(
                                 'Kein passendes Produkt gefunden.\n'
-                                    'Du kannst „${query.trim()}“ trotzdem '
-                                    'hinzufügen.',
+                                    'Du kannst „${query.trim()}“ '
+                                    'trotzdem hinzufügen.',
                                 textAlign: TextAlign.center,
                               ),
                             )
@@ -297,46 +452,60 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                                 alignment: Alignment.centerLeft,
                                 child: Text(
                                   'Passende Produkte',
-                                  style: Theme.of(context).textTheme.titleMedium,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium,
                                 ),
                               ),
                               const SizedBox(height: 12),
                               GridView.count(
                                 crossAxisCount: 2,
                                 shrinkWrap: true,
-                                physics: const NeverScrollableScrollPhysics(),
+                                physics:
+                                const NeverScrollableScrollPhysics(),
                                 mainAxisSpacing: 10,
                                 crossAxisSpacing: 10,
                                 childAspectRatio: 1.45,
-                                children: suggestions.map((suggestion) {
+                                children:
+                                suggestions.map((suggestion) {
                                   return OutlinedButton(
                                     onPressed: () {
-                                      FocusScope.of(sheetContext).unfocus();
+                                      FocusScope.of(
+                                        sheetContext,
+                                      ).unfocus();
 
                                       setSheetState(() {
-                                        selectedProduct = suggestion.name;
+                                        selectedProduct =
+                                            suggestion.name;
                                         query = suggestion.name;
                                         dialogCategory =
-                                            _categoryForSuggestion(suggestion);
+                                            suggestion.category;
                                         showDetails = true;
                                       });
                                     },
-                                    style: OutlinedButton.styleFrom(
-                                      padding: const EdgeInsets.all(10),
+                                    style:
+                                    OutlinedButton.styleFrom(
+                                      padding:
+                                      const EdgeInsets.all(10),
                                     ),
                                     child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment:
+                                      MainAxisAlignment.center,
                                       children: [
                                         Text(
                                           suggestion.emoji,
-                                          style: const TextStyle(fontSize: 28),
+                                          style: const TextStyle(
+                                            fontSize: 28,
+                                          ),
                                         ),
                                         const SizedBox(height: 6),
                                         Text(
                                           suggestion.name,
-                                          textAlign: TextAlign.center,
+                                          textAlign:
+                                          TextAlign.center,
                                           maxLines: 2,
-                                          overflow: TextOverflow.ellipsis,
+                                          overflow:
+                                          TextOverflow.ellipsis,
                                         ),
                                       ],
                                     ),
@@ -351,10 +520,26 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                               onPressed: query.trim().isEmpty
                                   ? null
                                   : () {
-                                FocusScope.of(sheetContext).unfocus();
+                                FocusScope.of(
+                                  sheetContext,
+                                ).unfocus();
+
+                                final exactSuggestion =
+                                _suggestionForName(
+                                  query,
+                                );
 
                                 setSheetState(() {
-                                  selectedProduct = query.trim();
+                                  selectedProduct =
+                                      query.trim();
+
+                                  if (exactSuggestion !=
+                                      null) {
+                                    dialogCategory =
+                                        exactSuggestion
+                                            .category;
+                                  }
+
                                   showDetails = true;
                                 });
                               },
@@ -362,25 +547,44 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                             ),
                           ),
                         ] else ...[
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              selectedProduct ?? query,
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
+                          Row(
+                            children: [
+                              Text(
+                                _suggestionForName(
+                                  selectedProduct ?? query,
+                                )?.emoji ??
+                                    '🛒',
+                                style: const TextStyle(
+                                  fontSize: 38,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  selectedProduct ?? query,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleLarge,
+                                ),
+                              ),
+                            ],
                           ),
                           const SizedBox(height: 20),
                           Row(
                             children: [
                               Expanded(
                                 child: TextFormField(
-                                  key: const ValueKey('quantity'),
+                                  key: const ValueKey(
+                                    'quantity',
+                                  ),
                                   initialValue: quantity,
                                   keyboardType:
-                                  const TextInputType.numberWithOptions(
+                                  const TextInputType
+                                      .numberWithOptions(
                                     decimal: true,
                                   ),
-                                  decoration: const InputDecoration(
+                                  decoration:
+                                  const InputDecoration(
                                     labelText: 'Menge',
                                   ),
                                   onChanged: (value) {
@@ -390,10 +594,13 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                               ),
                               const SizedBox(width: 12),
                               Expanded(
-                                child: DropdownButtonFormField<String>(
-                                  value: dialogUnit,
+                                child:
+                                DropdownButtonFormField<
+                                    String>(
+                                  initialValue: dialogUnit,
                                   isExpanded: true,
-                                  decoration: const InputDecoration(
+                                  decoration:
+                                  const InputDecoration(
                                     labelText: 'Einheit',
                                   ),
                                   items: units.map((unit) {
@@ -415,9 +622,10 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                           ),
                           const SizedBox(height: 16),
                           DropdownButtonFormField<String>(
-                            value: dialogCategory,
+                            initialValue: dialogCategory,
                             isExpanded: true,
-                            decoration: const InputDecoration(
+                            decoration:
+                            const InputDecoration(
                               labelText: 'Kategorie',
                             ),
                             items: _categories.map((category) {
@@ -438,9 +646,11 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                           TextFormField(
                             key: const ValueKey('note'),
                             initialValue: note,
-                            textCapitalization: TextCapitalization.sentences,
+                            textCapitalization:
+                            TextCapitalization.sentences,
                             maxLines: 2,
-                            decoration: const InputDecoration(
+                            decoration:
+                            const InputDecoration(
                               labelText: 'Notiz',
                               hintText: 'z. B. laktosefrei',
                             ),
@@ -457,8 +667,12 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                                   selectedProduct = null;
                                 });
                               },
-                              icon: const Icon(Icons.arrow_back),
-                              label: const Text('Anderen Artikel wählen'),
+                              icon: const Icon(
+                                Icons.arrow_back,
+                              ),
+                              label: const Text(
+                                'Anderen Artikel wählen',
+                              ),
                             ),
                           ],
                           const SizedBox(height: 16),
@@ -466,17 +680,22 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                             width: double.infinity,
                             child: FilledButton(
                               onPressed: () async {
-                                final wasSaved = await _saveItem(
+                                final wasSaved =
+                                await _saveItem(
                                   item: item,
-                                  name: selectedProduct ?? query,
+                                  name:
+                                  selectedProduct ?? query,
                                   quantity: quantity,
                                   unit: dialogUnit,
                                   category: dialogCategory,
                                   note: note,
                                 );
 
-                                if (wasSaved && sheetContext.mounted) {
-                                  Navigator.of(sheetContext).pop();
+                                if (wasSaved &&
+                                    sheetContext.mounted) {
+                                  Navigator.of(
+                                    sheetContext,
+                                  ).pop();
                                 }
                               },
                               child: const Text('Speichern'),
@@ -504,8 +723,10 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
     required String note,
   }) async {
     final cleanedName = name.trim();
-    final parsedQuantity =
-        double.tryParse(quantity.trim().replaceAll(',', '.')) ?? 1;
+    final parsedQuantity = double.tryParse(
+      quantity.trim().replaceAll(',', '.'),
+    ) ??
+        1;
 
     if (cleanedName.isEmpty || parsedQuantity <= 0) {
       return false;
@@ -513,7 +734,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
 
     setState(() {
       if (item == null) {
-        items.add(
+        _items.add(
           ShoppingItem(
             id: _generateId(),
             name: cleanedName,
@@ -540,20 +761,26 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
 
   Future<void> _toggleFavorite(int index) async {
     setState(() {
-      items[index].favorite = !items[index].favorite;
+      _items[index].favorite =
+      !_items[index].favorite;
       _sortItems();
     });
 
     await _saveItems();
   }
 
-  Future<void> _toggleItem(int index, bool value) async {
-    setState(() {
-      items[index].done = value;
+  Future<void> _toggleItem(
+      int index,
+      bool value,
+      ) async {
+    final wasDone = _items[index].done;
 
-      if (value) {
-        items[index].purchaseCount++;
-        items[index].lastPurchased = DateTime.now();
+    setState(() {
+      _items[index].done = value;
+
+      if (value && !wasDone) {
+        _items[index].purchaseCount++;
+        _items[index].lastPurchased = DateTime.now();
       }
     });
 
@@ -562,7 +789,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
 
   Future<void> _deleteItem(int index) async {
     setState(() {
-      items.removeAt(index);
+      _items.removeAt(index);
     });
 
     await _saveItems();
@@ -572,33 +799,51 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
       BuildContext context,
       List<ShoppingItem> shoppingItems,
       ) {
-    final groupedItems = <String, List<ShoppingItem>>{};
+    final groupedItems =
+    <String, List<ShoppingItem>>{};
 
     for (final item in shoppingItems) {
-      groupedItems.putIfAbsent(item.category, () => []);
+      groupedItems.putIfAbsent(
+        item.category,
+            () => [],
+      );
       groupedItems[item.category]!.add(item);
     }
 
-    final visibleCategories = groupedItems.keys.toList()
-      ..sort((a, b) => _categoryIndex(a).compareTo(_categoryIndex(b)));
+    final visibleCategories =
+    groupedItems.keys.toList()
+      ..sort(
+            (a, b) => _categoryIndex(a).compareTo(
+          _categoryIndex(b),
+        ),
+      );
 
     return visibleCategories.expand((category) {
       final categoryItems = groupedItems[category]!;
 
       return [
         Padding(
-          padding: const EdgeInsets.only(top: 12, bottom: 4),
+          padding: const EdgeInsets.only(
+            top: 12,
+            bottom: 4,
+          ),
           child: Text(
             category,
-            style: Theme.of(context).textTheme.titleMedium,
+            style:
+            Theme.of(context).textTheme.titleMedium,
           ),
         ),
         ...categoryItems.map((item) {
-          final index = items.indexOf(item);
+          final index = _items.indexOf(item);
 
           return ShoppingTile(
             item: item,
-            onChanged: (value) => _toggleItem(index, value ?? false),
+            onChanged: (value) {
+              _toggleItem(
+                index,
+                value ?? false,
+              );
+            },
             onDelete: () => _deleteItem(index),
             onFavorite: () => _toggleFavorite(index),
             onTap: () => _showItemDialog(item: item),
@@ -623,22 +868,107 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
           children: [
             Row(
               children: [
-                const Icon(Icons.shopping_cart_outlined),
+                const Icon(
+                  Icons.shopping_cart_outlined,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    '$completedCount von $totalCount Artikeln erledigt',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+                    '$completedCount von $totalCount '
+                        'Artikeln erledigt',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
-                Text('${(progress * 100).round()} %'),
+                Text(
+                  '${(progress * 100).round()} %',
+                ),
               ],
             ),
             const SizedBox(height: 12),
             LinearProgressIndicator(
               value: progress,
               minHeight: 8,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius:
+              BorderRadius.circular(20),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildListSelector() {
+    if (_lists.isEmpty) {
+      return Card(
+        child: ListTile(
+          leading: const Icon(
+            Icons.playlist_add,
+          ),
+          title: const Text(
+            'Noch keine Einkaufsliste',
+          ),
+          subtitle: const Text(
+            'Erstelle zuerst eine Liste.',
+          ),
+          trailing: FilledButton(
+            onPressed: _openListManagement,
+            child: const Text('Erstellen'),
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          16,
+          8,
+          8,
+          8,
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.list_alt),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                initialValue: _selectedListId,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Einkaufsliste',
+                  border: InputBorder.none,
+                ),
+                items: _lists.map((list) {
+                  final openItems = list.items
+                      .where((item) => !item.done)
+                      .length;
+
+                  return DropdownMenuItem(
+                    value: list.id,
+                    child: Text(
+                      '${list.name} ($openItems offen)',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  );
+                }).toList(),
+                onChanged: _selectList,
+              ),
+            ),
+            IconButton(
+              onPressed: _openListManagement,
+              icon: const Icon(
+                Icons.settings_outlined,
+              ),
+              tooltip: 'Einkaufslisten verwalten',
+            ),
+            IconButton(
+              onPressed: () => _loadLists(
+                preferredListId: _selectedListId,
+              ),
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Neu laden',
             ),
           ],
         ),
@@ -648,108 +978,205 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final filteredItems = items.where((item) {
-      final matchesSearch = item.name.toLowerCase().contains(search);
+    final filteredItems = _items.where((item) {
+      final matchesSearch =
+      item.name.toLowerCase().contains(_search);
+
       final matchesCategory =
-          selectedCategory == null || item.category == selectedCategory;
+          _selectedCategory == null ||
+              item.category == _selectedCategory;
 
       return matchesSearch && matchesCategory;
     }).toList();
 
-    final openItems = filteredItems.where((item) => !item.done).toList();
-    final completedItems = filteredItems.where((item) => item.done).toList();
+    final openItems = filteredItems
+        .where((item) => !item.done)
+        .toList();
+
+    final completedItems = filteredItems
+        .where((item) => item.done)
+        .toList();
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Einkaufsliste'),
+        title: const Text('Einkauf'),
+        actions: [
+          if (_isSaving)
+            const Padding(
+              padding: EdgeInsets.only(right: 16),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showItemDialog(),
+      floatingActionButton:
+      FloatingActionButton.extended(
+        onPressed: _selectedList == null
+            ? null
+            : () => _showItemDialog(),
         icon: const Icon(Icons.add),
         label: const Text('Artikel'),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 180),
-        children: [
-          TextField(
-            controller: _searchController,
-            decoration: const InputDecoration(
-              prefixIcon: Icon(Icons.search),
-              hintText: 'Artikel suchen...',
-            ),
+      body: _isLoading
+          ? const Center(
+        child: CircularProgressIndicator(),
+      )
+          : RefreshIndicator(
+        onRefresh: () => _loadLists(
+          preferredListId: _selectedListId,
+        ),
+        child: ListView(
+          physics:
+          const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(
+            16,
+            16,
+            16,
+            180,
           ),
-          const SectionTitle(title: '⭐ Häufig gekauft'),
-          FrequentItems(
-            items: items,
-            onTap: (name) => _showItemDialog(initialName: name),
-          ),
-          const SectionTitle(title: '🗂 Kategorien'),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              ChoiceChip(
-                label: const Text('Alle'),
-                selected: selectedCategory == null,
-                onSelected: (_) {
-                  setState(() {
-                    selectedCategory = null;
-                  });
-                },
+          children: [
+            _buildListSelector(),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _searchController,
+              enabled: _selectedList != null,
+              decoration: const InputDecoration(
+                prefixIcon: Icon(Icons.search),
+                hintText: 'Artikel suchen...',
               ),
-              ..._categories.map(
-                    (category) => ChoiceChip(
-                  label: Text(category),
-                  selected: selectedCategory == category,
-                  onSelected: (selected) {
+            ),
+            const SectionTitle(
+              title: '⭐ Häufig gekauft',
+            ),
+            FrequentItems(
+              items: _items,
+              onTap: (name) {
+                _showItemDialog(
+                  initialName: name,
+                );
+              },
+            ),
+            const SectionTitle(
+              title: '🗂 Kategorien',
+            ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ChoiceChip(
+                  label: const Text('Alle'),
+                  selected:
+                  _selectedCategory == null,
+                  onSelected: (_) {
                     setState(() {
-                      selectedCategory = selected ? category : null;
+                      _selectedCategory = null;
                     });
                   },
                 ),
+                ..._categories.map(
+                      (category) => ChoiceChip(
+                    label: Text(category),
+                    selected:
+                    _selectedCategory ==
+                        category,
+                    onSelected: (selected) {
+                      setState(() {
+                        _selectedCategory =
+                        selected
+                            ? category
+                            : null;
+                      });
+                    },
+                  ),
+                ),
+              ],
+            ),
+            _buildProgressCard(
+              completedCount:
+              completedItems.length,
+              totalCount:
+              filteredItems.length,
+            ),
+            SectionTitle(
+              title:
+              '🛒 Noch zu kaufen (${openItems.length})',
+            ),
+            if (_selectedList == null)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(
+                  child: Text(
+                    'Erstelle zuerst eine '
+                        'Einkaufsliste.',
+                  ),
+                ),
+              )
+            else if (openItems.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(
+                  child: Text(
+                    'Alles erledigt – '
+                        'die Liste ist leer. 🎉',
+                  ),
+                ),
+              )
+            else
+              ..._buildGroupedItems(
+                context,
+                openItems,
+              ),
+            if (completedItems.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Card(
+                child: ExpansionTile(
+                  leading: const Icon(
+                    Icons.check_circle_outline,
+                  ),
+                  title: Text(
+                    'Erledigt '
+                        '(${completedItems.length})',
+                  ),
+                  subtitle: const Text(
+                    'Antippen, um gekaufte '
+                        'Artikel zu sehen',
+                  ),
+                  childrenPadding:
+                  const EdgeInsets.fromLTRB(
+                    16,
+                    0,
+                    16,
+                    12,
+                  ),
+                  children: _buildGroupedItems(
+                    context,
+                    completedItems,
+                  ),
+                ),
               ),
             ],
-          ),
-          _buildProgressCard(
-            completedCount: completedItems.length,
-            totalCount: filteredItems.length,
-          ),
-          SectionTitle(title: '🛒 Noch zu kaufen (${openItems.length})'),
-          if (openItems.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(
-                child: Text('Alles erledigt – die Liste ist leer. 🎉'),
-              ),
-            )
-          else
-            ..._buildGroupedItems(context, openItems),
-          if (completedItems.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Card(
-              child: ExpansionTile(
-                leading: const Icon(Icons.check_circle_outline),
-                title: Text('Erledigt (${completedItems.length})'),
-                subtitle: const Text('Antippen, um gekaufte Artikel zu sehen'),
-                childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                children: _buildGroupedItems(context, completedItems),
-              ),
-            ),
           ],
-        ],
+        ),
       ),
     );
   }
 }
 
-class _ProductSuggestion {
-  const _ProductSuggestion(
-      this.emoji,
-      this.name,
-      this.categoryKeyword,
-      );
+extension _IterableFirstOrNullExtension<T> on Iterable<T> {
+  T? get firstOrNull {
+    final iterator = this.iterator;
 
-  final String emoji;
-  final String name;
-  final String categoryKeyword;
+    if (!iterator.moveNext()) {
+      return null;
+    }
+
+    return iterator.current;
+  }
 }
