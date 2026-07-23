@@ -1,0 +1,74 @@
+[
+  {
+    "id": "tomahawk_steak",
+    "name": "Tomahawk Steak",
+    "category": "Fleisch",
+    "keywords": ["Tomahawk", "Steak", "Rind", "Beef"]
+  },
+  {
+    "id": "rinderfilet",
+    "name": "Rinderfilet",
+    "category": "Fleisch",
+    "keywords": ["Rinderfilet", "Filet", "Rind", "Beef"]
+  },
+  {
+    "id": "hackfleisch_gemischt",
+    "name": "Hackfleisch gemischt",
+    "category": "Fleisch",
+    "keywords": ["Hackfleisch", "Gemischt"]
+  },
+  {
+    "id": "haehnchenbrust",
+    "name": "Hähnchenbrust",
+    "category": "Fleisch",
+    "keywords": ["Hähnchen", "Chicken"]
+  },
+  {
+    "id": "milch_35",
+    "name": "Milch 3,5 %",
+    "category": "Milchprodukte",
+    "keywords": ["Milch"]
+  },
+  {
+    "id": "butter",
+    "name": "Butter",
+    "category": "Milchprodukte",
+    "keywords": ["Butter"]
+  },
+  {
+    "id": "gouda",
+    "name": "Gouda",
+    "category": "Milchprodukte",
+    "keywords": ["Käse", "Gouda"]
+  },
+  {
+    "id": "cola",
+    "name": "Coca-Cola",
+    "category": "Getränke",
+    "keywords": ["Cola", "Coke"]
+  },
+  {
+    "id": "cola_zero",
+    "name": "Coca-Cola Zero",
+    "category": "Getränke",
+    "keywords": ["Cola Zero", "Zero"]
+  },
+  {
+    "id": "banane",
+    "name": "Banane",
+    "category": "Obst",
+    "keywords": ["Banane"]
+  },
+  {
+    "id": "apfel",
+    "name": "Apfel",
+    "category": "Obst",
+    "keywords": ["Apfel"]
+  },
+  {
+    "id": "tomate",
+    "name": "Tomate",
+    "category": "Gemüse",
+    "keywords": ["Tomate"]
+  }
+]
