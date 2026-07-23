@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../../core/constants/shopping_categories.dart';
+import 'default_product_suggestions.dart';
+import 'product_suggestion.dart';
 import 'shopping_item.dart';
 import 'shopping_list.dart';
 import 'shopping_service.dart';
@@ -47,6 +49,7 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
       _items = selectedList.isEmpty
           ? []
           : List<ShoppingItem>.from(selectedList.first.items);
+
       _sortItems();
       _isLoading = false;
     });
@@ -76,6 +79,9 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
     final categories = <String>[
       ...ShoppingCategories.categories,
       ..._items.map((item) => item.category),
+      ...defaultProductSuggestions.map(
+            (suggestion) => suggestion.category,
+      ),
       'Sonstiges',
     ];
 
@@ -94,7 +100,9 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
   void _sortItems() {
     _items.sort((a, b) {
       final categoryComparison =
-      _categoryIndex(a.category).compareTo(_categoryIndex(b.category));
+      _categoryIndex(a.category).compareTo(
+        _categoryIndex(b.category),
+      );
 
       if (categoryComparison != 0) {
         return categoryComparison;
@@ -104,7 +112,9 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
         return a.favorite ? -1 : 1;
       }
 
-      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+      return a.name.toLowerCase().compareTo(
+        b.name.toLowerCase(),
+      );
     });
   }
 
@@ -116,7 +126,44 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
     return quantity.toString().replaceAll('.', ',');
   }
 
-  Future<void> _toggleItem(ShoppingItem item, bool value) async {
+  List<ProductSuggestion> _matchingSuggestions(String query) {
+    final normalizedQuery = query.trim().toLowerCase();
+
+    if (normalizedQuery.isEmpty) {
+      return [];
+    }
+
+    return defaultProductSuggestions
+        .where(
+          (suggestion) =>
+          suggestion.name.toLowerCase().contains(
+            normalizedQuery,
+          ),
+    )
+        .take(6)
+        .toList();
+  }
+
+  ProductSuggestion? _suggestionForName(String name) {
+    final normalizedName = name.trim().toLowerCase();
+
+    for (final suggestion in defaultProductSuggestions) {
+      if (suggestion.name.toLowerCase() == normalizedName) {
+        return suggestion;
+      }
+    }
+
+    return null;
+  }
+
+  String _emojiForItem(ShoppingItem item) {
+    return _suggestionForName(item.name)?.emoji ?? '🛒';
+  }
+
+  Future<void> _toggleItem(
+      ShoppingItem item,
+      bool value,
+      ) async {
     final wasDone = item.done;
 
     setState(() {
@@ -126,6 +173,8 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
         item.purchaseCount++;
         item.lastPurchased = DateTime.now();
       }
+
+      _sortItems();
     });
 
     await _saveItems();
@@ -135,7 +184,9 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('${item.name} liegt jetzt im Einkaufswagen'),
+        content: Text(
+          '${item.name} liegt jetzt im Einkaufswagen',
+        ),
         action: SnackBarAction(
           label: 'Rückgängig',
           onPressed: () {
@@ -146,20 +197,39 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
     );
   }
 
-  Future<void> _deleteItem(ShoppingItem item) async {
+  Future<void> _toggleFavorite(
+      ShoppingItem item,
+      ) async {
+    setState(() {
+      item.favorite = !item.favorite;
+      _sortItems();
+    });
+
+    await _saveItems();
+  }
+
+  Future<void> _deleteItem(
+      ShoppingItem item,
+      ) async {
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Artikel löschen?'),
-          content: Text('${item.name} wird aus der Liste entfernt.'),
+          content: Text(
+            '${item.name} wird aus der Liste entfernt.',
+          ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
+              onPressed: () {
+                Navigator.of(dialogContext).pop(false);
+              },
               child: const Text('Abbrechen'),
             ),
             FilledButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
+              onPressed: () {
+                Navigator.of(dialogContext).pop(true);
+              },
               child: const Text('Löschen'),
             ),
           ],
@@ -177,13 +247,17 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
   }
 
   void _showItemSheet([ShoppingItem? item]) {
-    var name = item?.name ?? '';
-    var quantity = _formatQuantity(item?.quantity ?? 1);
+    var query = item?.name ?? '';
+    var selectedProductName = item?.name;
+    var quantity = _formatQuantity(
+      item?.quantity ?? 1,
+    );
     var unit = item?.unit ?? 'Stk.';
     var category = item?.category ?? 'Sonstiges';
     var note = item?.note ?? '';
 
-    final isNewItem = item == null;
+    final isEditing = item != null;
+    var showDetails = isEditing;
 
     const units = [
       'Stk.',
@@ -196,28 +270,51 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
       'Flasche',
     ];
 
-    showModalBottomSheet(
+    showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      enableDrag: false,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
-            final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+            final mediaQuery = MediaQuery.of(context);
+            final suggestions = _matchingSuggestions(query);
+
+            final availableHeight = math.max(
+              300.0,
+              mediaQuery.size.height -
+                  mediaQuery.viewInsets.bottom -
+                  mediaQuery.padding.top -
+                  24,
+            );
 
             return Padding(
-              padding: EdgeInsets.only(bottom: keyboardHeight),
+              padding: EdgeInsets.only(
+                bottom: mediaQuery.viewInsets.bottom,
+              ),
               child: SafeArea(
                 top: false,
                 child: Container(
+                  constraints: BoxConstraints(
+                    maxHeight: availableHeight,
+                  ),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surface,
-                    borderRadius: const BorderRadius.vertical(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surface,
+                    borderRadius:
+                    const BorderRadius.vertical(
                       top: Radius.circular(28),
                     ),
                   ),
                   child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+                    padding: const EdgeInsets.fromLTRB(
+                      20,
+                      12,
+                      20,
+                      28,
+                    ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -225,8 +322,11 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
                           width: 44,
                           height: 4,
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.outline,
-                            borderRadius: BorderRadius.circular(10),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .outline,
+                            borderRadius:
+                            BorderRadius.circular(10),
                           ),
                         ),
                         const SizedBox(height: 20),
@@ -234,16 +334,20 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
                           children: [
                             Expanded(
                               child: Text(
-                                isNewItem
-                                    ? 'Artikel hinzufügen'
-                                    : 'Artikel bearbeiten',
-                                style:
-                                Theme.of(context).textTheme.headlineSmall,
+                                isEditing
+                                    ? 'Artikel bearbeiten'
+                                    : showDetails
+                                    ? 'Details festlegen'
+                                    : 'Artikel hinzufügen',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .headlineSmall,
                               ),
                             ),
                             IconButton(
                               onPressed: () {
-                                Navigator.of(sheetContext).pop();
+                                Navigator.of(sheetContext)
+                                    .pop();
                               },
                               icon: const Icon(Icons.close),
                               tooltip: 'Schließen',
@@ -251,154 +355,377 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
                           ],
                         ),
                         const SizedBox(height: 16),
-                        TextFormField(
-                          key: ValueKey(
-                            isNewItem ? 'new-item-name' : 'edit-item-name',
-                          ),
-                          initialValue: name,
-                          autofocus: isNewItem,
-                          textCapitalization: TextCapitalization.sentences,
-                          decoration: const InputDecoration(
-                            labelText: 'Artikel',
-                            hintText: 'z. B. Milch',
-                          ),
-                          onChanged: (value) {
-                            name = value;
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: TextFormField(
-                                key: ValueKey(
-                                  isNewItem
-                                      ? 'new-item-quantity'
-                                      : 'edit-item-quantity',
-                                ),
-                                initialValue: quantity,
-                                keyboardType:
-                                const TextInputType.numberWithOptions(
-                                  decimal: true,
-                                ),
-                                decoration: const InputDecoration(
-                                  labelText: 'Menge',
-                                ),
-                                onChanged: (value) {
-                                  quantity = value;
-                                },
+                        if (!showDetails) ...[
+                          TextFormField(
+                            key: const ValueKey(
+                              'product-search',
+                            ),
+                            initialValue: query,
+                            autofocus: true,
+                            textCapitalization:
+                            TextCapitalization.sentences,
+                            decoration:
+                            const InputDecoration(
+                              labelText: 'Artikel suchen',
+                              hintText: 'z. B. Milch',
+                              prefixIcon: Icon(
+                                Icons.search,
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: DropdownButtonFormField<String>(
-                                value: unit,
-                                isExpanded: true,
-                                decoration: const InputDecoration(
-                                  labelText: 'Einheit',
-                                ),
-                                items: units.map((value) {
-                                  return DropdownMenuItem(
-                                    value: value,
-                                    child: Text(value),
-                                  );
-                                }).toList(),
-                                onChanged: (value) {
-                                  if (value == null) return;
-
-                                  setSheetState(() {
-                                    unit = value;
-                                  });
-                                },
+                            onChanged: (value) {
+                              setSheetState(() {
+                                query = value;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 18),
+                          if (query.trim().isEmpty)
+                            const Padding(
+                              padding:
+                              EdgeInsets.symmetric(
+                                vertical: 28,
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        DropdownButtonFormField<String>(
-                          value: category,
-                          isExpanded: true,
-                          decoration: const InputDecoration(
-                            labelText: 'Kategorie',
-                          ),
-                          items: _categories.map((value) {
-                            return DropdownMenuItem(
-                              value: value,
-                              child: Text(value),
-                            );
-                          }).toList(),
-                          onChanged: (value) {
-                            if (value == null) return;
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    Icons.search,
+                                    size: 52,
+                                  ),
+                                  SizedBox(height: 12),
+                                  Text(
+                                    'Gib einen Artikelnamen ein, '
+                                        'um passende Produkte zu sehen.',
+                                    textAlign:
+                                    TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                            )
+                          else if (suggestions.isEmpty)
+                            Padding(
+                              padding:
+                              const EdgeInsets.symmetric(
+                                vertical: 24,
+                              ),
+                              child: Column(
+                                children: [
+                                  const Text(
+                                    '🛒',
+                                    style: TextStyle(
+                                      fontSize: 44,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'Kein passendes Produkt gefunden.\n'
+                                        'Du kannst „${query.trim()}“ '
+                                        'trotzdem hinzufügen.',
+                                    textAlign:
+                                    TextAlign.center,
+                                  ),
+                                ],
+                              ),
+                            )
+                          else ...[
+                              Align(
+                                alignment:
+                                Alignment.centerLeft,
+                                child: Text(
+                                  'Passende Produkte',
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              GridView.count(
+                                crossAxisCount: 2,
+                                shrinkWrap: true,
+                                physics:
+                                const NeverScrollableScrollPhysics(),
+                                mainAxisSpacing: 10,
+                                crossAxisSpacing: 10,
+                                childAspectRatio: 1.45,
+                                children:
+                                suggestions.map((suggestion) {
+                                  return OutlinedButton(
+                                    onPressed: () {
+                                      FocusScope.of(
+                                        sheetContext,
+                                      ).unfocus();
 
-                            setSheetState(() {
-                              category = value;
-                            });
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          key: ValueKey(
-                            isNewItem ? 'new-item-note' : 'edit-item-note',
-                          ),
-                          initialValue: note,
-                          textCapitalization: TextCapitalization.sentences,
-                          maxLines: 2,
-                          decoration: const InputDecoration(
-                            labelText: 'Notiz',
-                            hintText: 'z. B. laktosefrei',
-                          ),
-                          onChanged: (value) {
-                            note = value;
-                          },
-                        ),
-                        const SizedBox(height: 20),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton(
-                            onPressed: () async {
-                              final cleanedName = name.trim();
-                              final parsedQuantity = double.tryParse(
-                                quantity.trim().replaceAll(',', '.'),
-                              );
-
-                              if (cleanedName.isEmpty ||
-                                  parsedQuantity == null ||
-                                  parsedQuantity <= 0) {
-                                return;
-                              }
-
-                              setState(() {
-                                if (isNewItem) {
-                                  _items.add(
-                                    ShoppingItem(
-                                      id: _generateId(),
-                                      name: cleanedName,
-                                      quantity: parsedQuantity,
-                                      unit: unit,
-                                      category: category,
-                                      note: note.trim(),
+                                      setSheetState(() {
+                                        selectedProductName =
+                                            suggestion.name;
+                                        query = suggestion.name;
+                                        category =
+                                            suggestion.category;
+                                        showDetails = true;
+                                      });
+                                    },
+                                    style:
+                                    OutlinedButton.styleFrom(
+                                      padding:
+                                      const EdgeInsets.all(
+                                        10,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      mainAxisAlignment:
+                                      MainAxisAlignment
+                                          .center,
+                                      children: [
+                                        Text(
+                                          suggestion.emoji,
+                                          style:
+                                          const TextStyle(
+                                            fontSize: 28,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          suggestion.name,
+                                          textAlign:
+                                          TextAlign.center,
+                                          maxLines: 2,
+                                          overflow:
+                                          TextOverflow
+                                              .ellipsis,
+                                        ),
+                                      ],
                                     ),
                                   );
-                                } else {
-                                  item.name = cleanedName;
-                                  item.quantity = parsedQuantity;
-                                  item.unit = unit;
-                                  item.category = category;
-                                  item.note = note.trim();
+                                }).toList(),
+                              ),
+                            ],
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton(
+                              onPressed:
+                              query.trim().isEmpty
+                                  ? null
+                                  : () {
+                                FocusScope.of(
+                                  sheetContext,
+                                ).unfocus();
+
+                                final exactSuggestion =
+                                _suggestionForName(
+                                  query,
+                                );
+
+                                setSheetState(() {
+                                  selectedProductName =
+                                      query.trim();
+
+                                  if (exactSuggestion !=
+                                      null) {
+                                    category =
+                                        exactSuggestion
+                                            .category;
+                                  }
+
+                                  showDetails = true;
+                                });
+                              },
+                              child: const Text('Weiter'),
+                            ),
+                          ),
+                        ] else ...[
+                          Row(
+                            crossAxisAlignment:
+                            CrossAxisAlignment.center,
+                            children: [
+                              Text(
+                                _suggestionForName(
+                                  selectedProductName ??
+                                      query,
+                                )?.emoji ??
+                                    '🛒',
+                                style: const TextStyle(
+                                  fontSize: 38,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  selectedProductName ??
+                                      query,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleLarge,
+                                ),
+                              ),
+                              if (!isEditing)
+                                TextButton(
+                                  onPressed: () {
+                                    setSheetState(() {
+                                      showDetails = false;
+                                    });
+                                  },
+                                  child: const Text(
+                                    'Ändern',
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 20),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextFormField(
+                                  key: ValueKey(
+                                    isEditing
+                                        ? 'edit-item-quantity'
+                                        : 'new-item-quantity',
+                                  ),
+                                  initialValue: quantity,
+                                  keyboardType:
+                                  const TextInputType
+                                      .numberWithOptions(
+                                    decimal: true,
+                                  ),
+                                  decoration:
+                                  const InputDecoration(
+                                    labelText: 'Menge',
+                                  ),
+                                  onChanged: (value) {
+                                    quantity = value;
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child:
+                                DropdownButtonFormField<
+                                    String>(
+                                  initialValue: unit,
+                                  isExpanded: true,
+                                  decoration:
+                                  const InputDecoration(
+                                    labelText: 'Einheit',
+                                  ),
+                                  items: units.map((value) {
+                                    return DropdownMenuItem(
+                                      value: value,
+                                      child: Text(value),
+                                    );
+                                  }).toList(),
+                                  onChanged: (value) {
+                                    if (value == null) return;
+
+                                    setSheetState(() {
+                                      unit = value;
+                                    });
+                                  },
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          DropdownButtonFormField<String>(
+                            initialValue: category,
+                            isExpanded: true,
+                            decoration:
+                            const InputDecoration(
+                              labelText: 'Kategorie',
+                            ),
+                            items: _categories.map((value) {
+                              return DropdownMenuItem(
+                                value: value,
+                                child: Text(value),
+                              );
+                            }).toList(),
+                            onChanged: (value) {
+                              if (value == null) return;
+
+                              setSheetState(() {
+                                category = value;
+                              });
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          TextFormField(
+                            key: ValueKey(
+                              isEditing
+                                  ? 'edit-item-note'
+                                  : 'new-item-note',
+                            ),
+                            initialValue: note,
+                            textCapitalization:
+                            TextCapitalization.sentences,
+                            maxLines: 2,
+                            decoration:
+                            const InputDecoration(
+                              labelText: 'Notiz',
+                              hintText:
+                              'z. B. laktosefrei',
+                            ),
+                            onChanged: (value) {
+                              note = value;
+                            },
+                          ),
+                          const SizedBox(height: 20),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton(
+                              onPressed: () async {
+                                final cleanedName =
+                                (selectedProductName ??
+                                    query)
+                                    .trim();
+
+                                final parsedQuantity =
+                                double.tryParse(
+                                  quantity
+                                      .trim()
+                                      .replaceAll(',', '.'),
+                                );
+
+                                if (cleanedName.isEmpty ||
+                                    parsedQuantity == null ||
+                                    parsedQuantity <= 0) {
+                                  return;
                                 }
 
-                                _sortItems();
-                              });
+                                setState(() {
+                                  if (item == null) {
+                                    _items.add(
+                                      ShoppingItem(
+                                        id: _generateId(),
+                                        name: cleanedName,
+                                        quantity:
+                                        parsedQuantity,
+                                        unit: unit,
+                                        category: category,
+                                        note: note.trim(),
+                                      ),
+                                    );
+                                  } else {
+                                    item.name = cleanedName;
+                                    item.quantity =
+                                        parsedQuantity;
+                                    item.unit = unit;
+                                    item.category = category;
+                                    item.note = note.trim();
+                                  }
 
-                              await _saveItems();
+                                  _sortItems();
+                                });
 
-                              if (sheetContext.mounted) {
-                                Navigator.of(sheetContext).pop();
-                              }
-                            },
-                            child: const Text('Speichern'),
+                                await _saveItems();
+
+                                if (sheetContext.mounted) {
+                                  Navigator.of(
+                                    sheetContext,
+                                  ).pop();
+                                }
+                              },
+                              child: const Text('Speichern'),
+                            ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
@@ -411,75 +738,153 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
     );
   }
 
-  List<Widget> _buildGroupedItems(List<ShoppingItem> shoppingItems) {
-    final groupedItems = <String, List<ShoppingItem>>{};
+  List<Widget> _buildGroupedItems(
+      List<ShoppingItem> shoppingItems,
+      ) {
+    final groupedItems =
+    <String, List<ShoppingItem>>{};
 
     for (final item in shoppingItems) {
-      groupedItems.putIfAbsent(item.category, () => []);
+      groupedItems.putIfAbsent(
+        item.category,
+            () => [],
+      );
       groupedItems[item.category]!.add(item);
     }
 
     final categories = groupedItems.keys.toList()
-      ..sort((a, b) => _categoryIndex(a).compareTo(_categoryIndex(b)));
+      ..sort(
+            (a, b) => _categoryIndex(a).compareTo(
+          _categoryIndex(b),
+        ),
+      );
 
     return categories.expand((category) {
       final categoryItems = groupedItems[category]!;
 
       return [
         Padding(
-          padding: const EdgeInsets.only(top: 18, bottom: 6),
+          padding: const EdgeInsets.only(
+            top: 18,
+            bottom: 6,
+          ),
           child: Text(
             category,
-            style: Theme.of(context).textTheme.titleMedium,
+            style: Theme.of(context)
+                .textTheme
+                .titleMedium,
           ),
         ),
         ...categoryItems.map((item) {
-          final textStyle = TextStyle(
-            fontWeight: FontWeight.w600,
-            decoration:
-            item.done ? TextDecoration.lineThrough : TextDecoration.none,
+          final titleStyle = TextStyle(
+            fontWeight: item.favorite
+                ? FontWeight.bold
+                : FontWeight.w600,
+            decoration: item.done
+                ? TextDecoration.lineThrough
+                : TextDecoration.none,
+          );
+
+          final subtitleStyle = TextStyle(
+            decoration: item.done
+                ? TextDecoration.lineThrough
+                : TextDecoration.none,
           );
 
           return Card(
-            margin: const EdgeInsets.symmetric(vertical: 5),
+            margin:
+            const EdgeInsets.symmetric(vertical: 5),
             child: ListTile(
               onTap: () => _showItemSheet(item),
-              leading: Checkbox(
-                value: item.done,
-                onChanged: (value) => _toggleItem(item, value ?? false),
+              leading: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _emojiForItem(item),
+                    style: const TextStyle(
+                      fontSize: 24,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Checkbox(
+                    value: item.done,
+                    visualDensity:
+                    VisualDensity.compact,
+                    materialTapTargetSize:
+                    MaterialTapTargetSize
+                        .shrinkWrap,
+                    onChanged: (value) {
+                      _toggleItem(
+                        item,
+                        value ?? false,
+                      );
+                    },
+                  ),
+                ],
               ),
               title: Text(
                 item.name,
-                style: textStyle,
+                style: titleStyle,
               ),
               subtitle: Text(
                 item.note.trim().isEmpty
-                    ? '${_formatQuantity(item.quantity)} ${item.unit}'
-                    : '${_formatQuantity(item.quantity)} ${item.unit}'
-                    ' • ${item.note}',
-                style: TextStyle(
-                  decoration: item.done
-                      ? TextDecoration.lineThrough
-                      : TextDecoration.none,
-                ),
+                    ? '${_formatQuantity(item.quantity)} '
+                    '${item.unit}'
+                    : '${_formatQuantity(item.quantity)} '
+                    '${item.unit} • ${item.note}',
+                style: subtitleStyle,
               ),
-              trailing: PopupMenuButton<_ItemAction>(
+              trailing:
+              PopupMenuButton<_ItemAction>(
                 tooltip: 'Optionen',
                 onSelected: (action) {
-                  if (action == _ItemAction.edit) {
-                    _showItemSheet(item);
-                  } else {
-                    _deleteItem(item);
+                  switch (action) {
+                    case _ItemAction.favorite:
+                      _toggleFavorite(item);
+                    case _ItemAction.edit:
+                      _showItemSheet(item);
+                    case _ItemAction.delete:
+                      _deleteItem(item);
                   }
                 },
-                itemBuilder: (context) => const [
+                itemBuilder: (context) => [
                   PopupMenuItem(
-                    value: _ItemAction.edit,
-                    child: Text('Bearbeiten'),
+                    value: _ItemAction.favorite,
+                    child: Row(
+                      children: [
+                        Icon(
+                          item.favorite
+                              ? Icons.star
+                              : Icons.star_border,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          item.favorite
+                              ? 'Favorit entfernen'
+                              : 'Als Favorit markieren',
+                        ),
+                      ],
+                    ),
                   ),
-                  PopupMenuItem(
+                  const PopupMenuItem(
+                    value: _ItemAction.edit,
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit_outlined),
+                        SizedBox(width: 12),
+                        Text('Bearbeiten'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
                     value: _ItemAction.delete,
-                    child: Text('Löschen'),
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_outline),
+                        SizedBox(width: 12),
+                        Text('Löschen'),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -492,50 +897,72 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final openItems = _items.where((item) => !item.done).toList();
-    final basketItems = _items.where((item) => item.done).toList();
+    final openItems = _items
+        .where((item) => !item.done)
+        .toList();
+
+    final basketItems = _items
+        .where((item) => item.done)
+        .toList();
 
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.listName),
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton:
+      FloatingActionButton.extended(
         onPressed: () => _showItemSheet(),
         icon: const Icon(Icons.add),
         label: const Text('Artikel'),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(
+        child: CircularProgressIndicator(),
+      )
           : RefreshIndicator(
         onRefresh: _loadItems,
         child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 110),
+          physics:
+          const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(
+            16,
+            12,
+            16,
+            110,
+          ),
           children: [
             Text(
               '${openItems.length} offene '
                   '${openItems.length == 1 ? 'Sache' : 'Sachen'}',
-              style: Theme.of(context).textTheme.titleMedium,
+              style: Theme.of(context)
+                  .textTheme
+                  .titleMedium,
             ),
             const SizedBox(height: 4),
             Text(
               'Tippe auf einen Artikel zum Bearbeiten.',
-              style: Theme.of(context).textTheme.bodyMedium,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodyMedium,
             ),
             if (openItems.isEmpty)
               const Padding(
-                padding: EdgeInsets.only(top: 80),
+                padding:
+                EdgeInsets.only(top: 80),
                 child: Center(
                   child: Column(
                     children: [
                       Icon(
-                        Icons.check_circle_outline,
+                        Icons
+                            .check_circle_outline,
                         size: 64,
                       ),
                       SizedBox(height: 16),
                       Text(
                         'Alles auf der Liste erledigt! 🎉',
-                        style: TextStyle(fontSize: 20),
+                        style: TextStyle(
+                          fontSize: 20,
+                        ),
                       ),
                     ],
                   ),
@@ -548,19 +975,32 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
               Card(
                 child: ExpansionTile(
                   initiallyExpanded: true,
-                  leading: const Icon(Icons.shopping_cart),
+                  leading: const Icon(
+                    Icons.shopping_cart,
+                  ),
                   title: Text(
-                    'Im Einkaufswagen (${basketItems.length})',
+                    'Im Einkaufswagen '
+                        '(${basketItems.length})',
                     style: const TextStyle(
-                      fontWeight: FontWeight.bold,
+                      fontWeight:
+                      FontWeight.bold,
                     ),
                   ),
                   subtitle: const Text(
-                    'Haken entfernen, um Artikel zurückzulegen',
+                    'Haken entfernen, um Artikel '
+                        'zurückzulegen',
                   ),
                   childrenPadding:
-                  const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  children: _buildGroupedItems(basketItems),
+                  const EdgeInsets.fromLTRB(
+                    16,
+                    0,
+                    16,
+                    12,
+                  ),
+                  children:
+                  _buildGroupedItems(
+                    basketItems,
+                  ),
                 ),
               ),
             ],
@@ -572,6 +1012,7 @@ class _ShoppingListModeScreenState extends State<ShoppingListModeScreen> {
 }
 
 enum _ItemAction {
+  favorite,
   edit,
   delete,
 }
