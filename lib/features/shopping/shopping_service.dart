@@ -2,12 +2,14 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'shopping_history_entry.dart';
 import 'shopping_item.dart';
 import 'shopping_list.dart';
 
 class ShoppingService {
   static const String storageKey = 'shopping_items';
   static const String listsStorageKey = 'shopping_lists';
+  static const String historyStorageKey = 'shopping_history';
   static const String defaultListId = 'default-shopping-list';
 
   Future<List<ShoppingList>> loadLists() async {
@@ -89,7 +91,10 @@ class ShoppingService {
       lists.map((list) => list.toJson()).toList(),
     );
 
-    await prefs.setString(listsStorageKey, storedLists);
+    await prefs.setString(
+      listsStorageKey,
+      storedLists,
+    );
   }
 
   Future<List<ShoppingItem>> loadItems() async {
@@ -99,10 +104,14 @@ class ShoppingService {
       return [];
     }
 
-    return List<ShoppingItem>.from(lists.first.items);
+    return List<ShoppingItem>.from(
+      lists.first.items,
+    );
   }
 
-  Future<void> saveItems(List<ShoppingItem> items) async {
+  Future<void> saveItems(
+      List<ShoppingItem> items,
+      ) async {
     final lists = await loadLists();
 
     if (lists.isEmpty) {
@@ -114,10 +123,114 @@ class ShoppingService {
         ),
       );
     } else {
-      lists.first.items = List<ShoppingItem>.from(items);
+      lists.first.items =
+      List<ShoppingItem>.from(items);
     }
 
     await saveLists(lists);
+  }
+
+  Future<List<ShoppingHistoryEntry>>
+  loadHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+    final storedHistory =
+    prefs.getString(historyStorageKey);
+
+    if (storedHistory == null ||
+        storedHistory.isEmpty) {
+      return [];
+    }
+
+    try {
+      final decoded = jsonDecode(storedHistory);
+
+      if (decoded is! List) {
+        return [];
+      }
+
+      final entries = decoded
+          .whereType<Map>()
+          .map(
+            (entry) =>
+            ShoppingHistoryEntry.fromJson(
+              Map<String, dynamic>.from(entry),
+            ),
+      )
+          .where(
+            (entry) =>
+        entry.id.isNotEmpty &&
+            entry.items.isNotEmpty,
+      )
+          .toList();
+
+      entries.sort(
+            (a, b) => b.completedAt.compareTo(
+          a.completedAt,
+        ),
+      );
+
+      return entries;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveHistory(
+      List<ShoppingHistoryEntry> history,
+      ) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final sortedHistory =
+    List<ShoppingHistoryEntry>.from(history)
+      ..sort(
+            (a, b) => b.completedAt.compareTo(
+          a.completedAt,
+        ),
+      );
+
+    final storedHistory = jsonEncode(
+      sortedHistory
+          .map((entry) => entry.toJson())
+          .toList(),
+    );
+
+    await prefs.setString(
+      historyStorageKey,
+      storedHistory,
+    );
+  }
+
+  Future<void> addHistoryEntry(
+      ShoppingHistoryEntry entry,
+      ) async {
+    final history = await loadHistory();
+
+    history.removeWhere(
+          (existingEntry) =>
+      existingEntry.id == entry.id,
+    );
+
+    history.insert(0, entry);
+
+    await saveHistory(history);
+  }
+
+  Future<void> deleteHistoryEntry(
+      String entryId,
+      ) async {
+    final history = await loadHistory();
+
+    history.removeWhere(
+          (entry) => entry.id == entryId,
+    );
+
+    await saveHistory(history);
+  }
+
+  Future<void> clearHistory() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.remove(historyStorageKey);
   }
 
   Future<void> clear() async {
@@ -125,5 +238,6 @@ class ShoppingService {
 
     await prefs.remove(storageKey);
     await prefs.remove(listsStorageKey);
+    await prefs.remove(historyStorageKey);
   }
 }

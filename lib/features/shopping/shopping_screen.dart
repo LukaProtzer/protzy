@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/shopping_categories.dart';
 import 'default_product_suggestions.dart';
+import 'shopping_history_entry.dart';
+import 'shopping_history_screen.dart';
 import 'shopping_item.dart';
 import 'shopping_list.dart';
 import 'shopping_lists_screen.dart';
@@ -181,6 +183,20 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => const ShoppingListsScreen(),
+      ),
+    );
+
+    if (!mounted) return;
+
+    await _loadLists(
+      preferredTargetListId: _selectedTargetListId,
+    );
+  }
+
+  Future<void> _openHistory() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const ShoppingHistoryScreen(),
       ),
     );
 
@@ -442,7 +458,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
   Future<void> _finishShopping(
       List<_ShoppingEntry> cartEntries,
       ) async {
-    if (cartEntries.isEmpty) {
+    if (cartEntries.isEmpty || _isSaving) {
       return;
     }
 
@@ -452,8 +468,9 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
         return AlertDialog(
           title: const Text('Einkauf abschließen?'),
           content: Text(
-            '${cartEntries.length} Artikel werden aus '
-                'dem Einkaufswagen und den Einkaufslisten entfernt.',
+            '${cartEntries.length} Artikel werden aus dem '
+                'Einkaufswagen entfernt und dauerhaft in der '
+                'Einkaufshistorie gespeichert.',
           ),
           actions: [
             TextButton(
@@ -478,25 +495,77 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
       return;
     }
 
+    setState(() {
+      _isSaving = true;
+    });
+
+    final completedAt = DateTime.now();
+
+    final sourceLists = <String, ShoppingList>{};
+
+    for (final entry in cartEntries) {
+      sourceLists[entry.list.id] = entry.list;
+    }
+
+    final historyEntry = ShoppingHistoryEntry(
+      id: _generateId(),
+      completedAt: completedAt,
+      items: cartEntries
+          .map(
+            (entry) => ShoppingHistoryItem.fromShoppingItem(
+          item: entry.item,
+          sourceListId: entry.list.id,
+          sourceListName: entry.list.name,
+          purchasedAt:
+          entry.item.lastPurchased ?? completedAt,
+        ),
+      )
+          .toList(),
+      sourceListIds: sourceLists.keys.toList(),
+      sourceListNames: sourceLists.values
+          .map((list) => list.name)
+          .toList(),
+    );
+
     final cartItemIds = cartEntries
         .map((entry) => entry.item.id)
         .toSet();
 
-    setState(() {
+    try {
+      await _service.addHistoryEntry(historyEntry);
+
       for (final list in _lists) {
         list.items.removeWhere(
               (item) => cartItemIds.contains(item.id),
         );
       }
-    });
 
-    await _saveLists();
+      await _service.saveLists(_lists);
 
-    if (!mounted) return;
+      if (!mounted) return;
 
-    _showShortMessage(
-      'Einkauf abgeschlossen.',
-    );
+      setState(() {});
+
+      _showShortMessage(
+        'Einkauf gespeichert und abgeschlossen.',
+        action: SnackBarAction(
+          label: 'Historie',
+          onPressed: _openHistory,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+
+      _showShortMessage(
+        'Der Einkauf konnte nicht abgeschlossen werden.',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
   }
 
   List<_ShoppingEntry> _filteredEntries() {
@@ -866,9 +935,10 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
 
   Widget _buildCartSection(
       BuildContext context,
-      List<_ShoppingEntry> cartEntries,
+      List<_ShoppingEntry> visibleCartEntries,
+      List<_ShoppingEntry> allCartEntries,
       ) {
-    if (cartEntries.isEmpty) {
+    if (allCartEntries.isEmpty) {
       return const SizedBox.shrink();
     }
 
@@ -878,11 +948,16 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
         initiallyExpanded: true,
         leading: const Icon(Icons.shopping_cart),
         title: Text(
-          'Im Einkaufswagen (${cartEntries.length})',
+          'Im Einkaufswagen (${allCartEntries.length})',
         ),
-        subtitle: const Text(
+        subtitle: visibleCartEntries.length == allCartEntries.length
+            ? const Text(
           'Artikel können zurückgelegt oder '
               'gemeinsam abgeschlossen werden.',
+        )
+            : Text(
+          '${visibleCartEntries.length} von '
+              '${allCartEntries.length} Artikeln sichtbar',
         ),
         childrenPadding: const EdgeInsets.fromLTRB(
           16,
@@ -891,20 +966,33 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
           16,
         ),
         children: [
-          ..._buildGroupedEntries(
-            context,
-            cartEntries,
-          ),
+          if (visibleCartEntries.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Text(
+                'Der Einkaufswagen enthält Artikel, '
+                    'die nicht zum aktuellen Filter passen.',
+                textAlign: TextAlign.center,
+              ),
+            )
+          else
+            ..._buildGroupedEntries(
+              context,
+              visibleCartEntries,
+            ),
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: () {
-                _finishShopping(cartEntries);
+              onPressed: _isSaving
+                  ? null
+                  : () {
+                _finishShopping(allCartEntries);
               },
               icon: const Icon(Icons.done_all),
-              label: const Text(
-                'Einkauf abschließen',
+              label: Text(
+                'Einkauf abschließen '
+                    '(${allCartEntries.length})',
               ),
             ),
           ),
@@ -921,7 +1009,11 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
         .where((entry) => !entry.item.done)
         .toList();
 
-    final cartEntries = filteredEntries
+    final visibleCartEntries = filteredEntries
+        .where((entry) => entry.item.done)
+        .toList();
+
+    final allCartEntries = _allEntries
         .where((entry) => entry.item.done)
         .toList();
 
@@ -929,6 +1021,11 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
       appBar: AppBar(
         title: const Text('Einkauf'),
         actions: [
+          IconButton(
+            onPressed: _openHistory,
+            icon: const Icon(Icons.history),
+            tooltip: 'Einkaufshistorie',
+          ),
           if (_isSaving)
             const Padding(
               padding: EdgeInsets.only(right: 16),
@@ -1029,9 +1126,8 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
               ],
             ),
             _buildProgressCard(
-              cartCount: cartEntries.length,
-              totalCount:
-              filteredEntries.length,
+              cartCount: allCartEntries.length,
+              totalCount: _allEntries.length,
             ),
             SectionTitle(
               title:
@@ -1063,7 +1159,8 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
               ),
             _buildCartSection(
               context,
-              cartEntries,
+              visibleCartEntries,
+              allCartEntries,
             ),
           ],
         ),
