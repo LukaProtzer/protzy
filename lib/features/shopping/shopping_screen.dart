@@ -4,17 +4,21 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/shopping_categories.dart';
 import 'default_product_suggestions.dart';
-import 'product_suggestion.dart';
 import 'shopping_item.dart';
 import 'shopping_list.dart';
 import 'shopping_lists_screen.dart';
 import 'shopping_service.dart';
 import 'widgets/frequent_items.dart';
 import 'widgets/section_title.dart';
-import 'widgets/shopping_tile.dart';
+import 'widgets/shopping_item_sheet.dart';
 
 class ShoppingScreen extends StatefulWidget {
-  const ShoppingScreen({super.key});
+  const ShoppingScreen({
+    super.key,
+    this.refreshToken = 0,
+  });
+
+  final int refreshToken;
 
   @override
   State<ShoppingScreen> createState() => _ShoppingScreenState();
@@ -25,29 +29,45 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
   final TextEditingController _searchController = TextEditingController();
 
   List<ShoppingList> _lists = [];
-  List<ShoppingItem> _items = [];
 
-  String? _selectedListId;
+  String? _selectedTargetListId;
   String _search = '';
   String? _selectedCategory;
 
   bool _isLoading = true;
   bool _isSaving = false;
 
-  ShoppingList? get _selectedList {
-    final selectedListId = _selectedListId;
+  ShoppingList? get _selectedTargetList {
+    final selectedId = _selectedTargetListId;
 
-    if (selectedListId == null) {
+    if (selectedId == null) {
       return null;
     }
 
     for (final list in _lists) {
-      if (list.id == selectedListId) {
+      if (list.id == selectedId) {
         return list;
       }
     }
 
     return null;
+  }
+
+  List<_ShoppingEntry> get _allEntries {
+    return [
+      for (final list in _lists)
+        for (final item in list.items)
+          _ShoppingEntry(
+            list: list,
+            item: item,
+          ),
+    ];
+  }
+
+  List<ShoppingItem> get _allItems {
+    return [
+      for (final list in _lists) ...list.items,
+    ];
   }
 
   @override
@@ -56,6 +76,17 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
 
     _searchController.addListener(_handleSearchChanged);
     _loadLists();
+  }
+
+  @override
+  void didUpdateWidget(covariant ShoppingScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.refreshToken != widget.refreshToken) {
+      _loadLists(
+        preferredTargetListId: _selectedTargetListId,
+      );
+    }
   }
 
   @override
@@ -76,66 +107,58 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
   }
 
   Future<void> _loadLists({
-    String? preferredListId,
+    String? preferredTargetListId,
   }) async {
-    setState(() {
-      _isLoading = true;
-    });
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
 
     final loadedLists = await _service.loadLists();
 
     if (!mounted) return;
 
-    String? nextListId = preferredListId ?? _selectedListId;
+    String? nextTargetListId =
+        preferredTargetListId ?? _selectedTargetListId;
 
-    final containsSelectedList = loadedLists.any(
-          (list) => list.id == nextListId,
+    final targetStillExists = loadedLists.any(
+          (list) => list.id == nextTargetListId,
     );
 
-    if (!containsSelectedList) {
-      nextListId = loadedLists.isEmpty ? null : loadedLists.first.id;
+    if (!targetStillExists) {
+      nextTargetListId =
+      loadedLists.isEmpty ? null : loadedLists.first.id;
     }
-
-    final selectedList = loadedLists
-        .where((list) => list.id == nextListId)
-        .cast<ShoppingList?>()
-        .firstOrNull;
 
     setState(() {
       _lists = loadedLists;
-      _selectedListId = nextListId;
-      _items = selectedList == null
-          ? []
-          : List<ShoppingItem>.from(selectedList.items);
+      _selectedTargetListId = nextTargetListId;
       _selectedCategory = null;
-      _sortItems();
       _isLoading = false;
     });
   }
 
-  Future<void> _selectList(String? listId) async {
-    if (listId == null || listId == _selectedListId) {
+  void _selectTargetList(String? listId) {
+    if (listId == null || listId == _selectedTargetListId) {
       return;
     }
 
-    final list = _lists.where((entry) => entry.id == listId).firstOrNull;
+    final exists = _lists.any(
+          (list) => list.id == listId,
+    );
 
-    if (list == null) {
+    if (!exists) {
       return;
     }
 
     setState(() {
-      _selectedListId = list.id;
-      _items = List<ShoppingItem>.from(list.items);
-      _selectedCategory = null;
-      _sortItems();
+      _selectedTargetListId = listId;
     });
   }
 
-  Future<void> _saveItems() async {
-    final selectedListId = _selectedListId;
-
-    if (selectedListId == null || _isSaving) {
+  Future<void> _saveLists() async {
+    if (_isSaving) {
       return;
     }
 
@@ -144,23 +167,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
     });
 
     try {
-      final lists = await _service.loadLists();
-      final index = lists.indexWhere(
-            (list) => list.id == selectedListId,
-      );
-
-      if (index == -1) {
-        return;
-      }
-
-      lists[index].items = List<ShoppingItem>.from(_items);
-      await _service.saveLists(lists);
-
-      if (!mounted) return;
-
-      setState(() {
-        _lists = lists;
-      });
+      await _service.saveLists(_lists);
     } finally {
       if (mounted) {
         setState(() {
@@ -180,7 +187,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
     if (!mounted) return;
 
     await _loadLists(
-      preferredListId: _selectedListId,
+      preferredTargetListId: _selectedTargetListId,
     );
   }
 
@@ -194,7 +201,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
   List<String> get _categories {
     final categories = <String>[
       ...ShoppingCategories.categories,
-      ..._items.map((item) => item.category),
+      ..._allItems.map((item) => item.category),
       ...defaultProductSuggestions.map(
             (suggestion) => suggestion.category,
       ),
@@ -213,28 +220,6 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
     return index == -1 ? _categories.length : index;
   }
 
-  void _sortItems() {
-    _items.sort((a, b) {
-      final categoryComparison = _categoryIndex(
-        a.category,
-      ).compareTo(
-        _categoryIndex(b.category),
-      );
-
-      if (categoryComparison != 0) {
-        return categoryComparison;
-      }
-
-      if (a.favorite != b.favorite) {
-        return a.favorite ? -1 : 1;
-      }
-
-      return a.name.toLowerCase().compareTo(
-        b.name.toLowerCase(),
-      );
-    });
-  }
-
   String _formatQuantity(double quantity) {
     if (quantity == quantity.roundToDouble()) {
       return quantity.toInt().toString();
@@ -243,575 +228,343 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
     return quantity.toString().replaceAll('.', ',');
   }
 
-  List<ProductSuggestion> _matchingSuggestions(String query) {
-    final normalizedQuery = query.trim().toLowerCase();
-
-    if (normalizedQuery.isEmpty) {
-      return [];
-    }
-
-    return defaultProductSuggestions
-        .where(
-          (suggestion) => suggestion.name
-          .toLowerCase()
-          .contains(normalizedQuery),
-    )
-        .take(6)
-        .toList();
-  }
-
-  ProductSuggestion? _suggestionForName(String name) {
-    final normalizedName = name.trim().toLowerCase();
+  String _emojiForItem(ShoppingItem item) {
+    final normalizedName = item.name.trim().toLowerCase();
 
     for (final suggestion in defaultProductSuggestions) {
       if (suggestion.name.toLowerCase() == normalizedName) {
-        return suggestion;
+        return suggestion.emoji;
       }
     }
 
-    return null;
+    return '🛒';
   }
 
-  void _showItemDialog({
-    String initialName = '',
-    ShoppingItem? item,
-  }) {
-    if (_selectedList == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Erstelle zuerst eine Einkaufsliste.',
-          ),
+  void _showShortMessage(
+      String message, {
+        SnackBarAction? action,
+      }) {
+    final messenger = ScaffoldMessenger.of(context);
+
+    messenger
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          duration: const Duration(seconds: 2),
+          action: action,
         ),
+      );
+  }
+
+  Future<void> _showNewItemDialog({
+    String initialName = '',
+  }) async {
+    final targetList = _selectedTargetList;
+
+    if (targetList == null) {
+      _showShortMessage(
+        'Erstelle zuerst eine Einkaufsliste.',
       );
       return;
     }
 
-    var query = item?.name ?? initialName;
-    var selectedProduct = item?.name;
-    var dialogCategory =
-        item?.category ?? _selectedCategory ?? 'Sonstiges';
-    var dialogUnit = item?.unit ?? 'Stk.';
-    var quantity = _formatQuantity(item?.quantity ?? 1);
-    var note = item?.note ?? '';
-
-    final isEditing = item != null;
-    var showDetails = isEditing;
-
-    const units = [
-      'Stk.',
-      'g',
-      'kg',
-      'ml',
-      'l',
-      'Packung',
-      'Dose',
-      'Flasche',
-    ];
-
-    showModalBottomSheet<void>(
+    final result = await showShoppingItemSheet(
       context: context,
-      isScrollControlled: true,
-      enableDrag: false,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            final suggestions = _matchingSuggestions(query);
-            final mediaQuery = MediaQuery.of(context);
+      listName: targetList.name,
+      categories: _categories,
+      initialName: initialName,
+      initialCategory: _selectedCategory,
+    );
 
-            final availableHeight = math.max(
-              300.0,
-              mediaQuery.size.height -
-                  mediaQuery.viewInsets.bottom -
-                  mediaQuery.padding.top -
-                  24,
-            );
+    if (result == null || !mounted) {
+      return;
+    }
 
-            return Padding(
-              padding: EdgeInsets.only(
-                bottom: mediaQuery.viewInsets.bottom,
-              ),
-              child: SafeArea(
-                top: false,
-                child: Container(
-                  constraints: BoxConstraints(
-                    maxHeight: availableHeight,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surface,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(28),
-                    ),
-                  ),
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.fromLTRB(
-                      20,
-                      12,
-                      20,
-                      24,
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 44,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .outline,
-                            borderRadius:
-                            BorderRadius.circular(10),
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                isEditing
-                                    ? 'Artikel bearbeiten'
-                                    : showDetails
-                                    ? 'Details festlegen'
-                                    : 'Artikel hinzufügen',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineSmall,
-                              ),
-                            ),
-                            IconButton(
-                              onPressed: () {
-                                Navigator.of(sheetContext).pop();
-                              },
-                              icon: const Icon(Icons.close),
-                              tooltip: 'Schließen',
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Chip(
-                            avatar: const Icon(
-                              Icons.list_alt,
-                              size: 18,
-                            ),
-                            label: Text(
-                              'Liste: ${_selectedList!.name}',
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        if (!showDetails) ...[
-                          TextFormField(
-                            key: const ValueKey(
-                              'product-search',
-                            ),
-                            initialValue: query,
-                            autofocus: true,
-                            textCapitalization:
-                            TextCapitalization.sentences,
-                            decoration: const InputDecoration(
-                              labelText: 'Artikel suchen',
-                              hintText: 'z. B. Milch',
-                              prefixIcon: Icon(Icons.search),
-                            ),
-                            onChanged: (value) {
-                              setSheetState(() {
-                                query = value;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 18),
-                          if (query.trim().isEmpty)
-                            const Padding(
-                              padding: EdgeInsets.symmetric(
-                                vertical: 24,
-                              ),
-                              child: Text(
-                                'Gib einen Artikelnamen ein, '
-                                    'um passende Produkte zu sehen.',
-                                textAlign: TextAlign.center,
-                              ),
-                            )
-                          else if (suggestions.isEmpty)
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                vertical: 24,
-                              ),
-                              child: Text(
-                                'Kein passendes Produkt gefunden.\n'
-                                    'Du kannst „${query.trim()}“ '
-                                    'trotzdem hinzufügen.',
-                                textAlign: TextAlign.center,
-                              ),
-                            )
-                          else ...[
-                              Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  'Passende Produkte',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleMedium,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              GridView.count(
-                                crossAxisCount: 2,
-                                shrinkWrap: true,
-                                physics:
-                                const NeverScrollableScrollPhysics(),
-                                mainAxisSpacing: 10,
-                                crossAxisSpacing: 10,
-                                childAspectRatio: 1.45,
-                                children:
-                                suggestions.map((suggestion) {
-                                  return OutlinedButton(
-                                    onPressed: () {
-                                      FocusScope.of(
-                                        sheetContext,
-                                      ).unfocus();
+    setState(() {
+      targetList.items.add(
+        ShoppingItem(
+          id: _generateId(),
+          name: result.name,
+          quantity: result.quantity,
+          unit: result.unit,
+          category: result.category,
+          note: result.note,
+        ),
+      );
+    });
 
-                                      setSheetState(() {
-                                        selectedProduct =
-                                            suggestion.name;
-                                        query = suggestion.name;
-                                        dialogCategory =
-                                            suggestion.category;
-                                        showDetails = true;
-                                      });
-                                    },
-                                    style:
-                                    OutlinedButton.styleFrom(
-                                      padding:
-                                      const EdgeInsets.all(10),
-                                    ),
-                                    child: Column(
-                                      mainAxisAlignment:
-                                      MainAxisAlignment.center,
-                                      children: [
-                                        Text(
-                                          suggestion.emoji,
-                                          style: const TextStyle(
-                                            fontSize: 28,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 6),
-                                        Text(
-                                          suggestion.name,
-                                          textAlign:
-                                          TextAlign.center,
-                                          maxLines: 2,
-                                          overflow:
-                                          TextOverflow.ellipsis,
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                            ],
-                          const SizedBox(height: 20),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton(
-                              onPressed: query.trim().isEmpty
-                                  ? null
-                                  : () {
-                                FocusScope.of(
-                                  sheetContext,
-                                ).unfocus();
+    await _saveLists();
+  }
 
-                                final exactSuggestion =
-                                _suggestionForName(
-                                  query,
-                                );
+  Future<void> _showEditItemDialog(
+      _ShoppingEntry entry,
+      ) async {
+    final result = await showShoppingItemSheet(
+      context: context,
+      listName: entry.list.name,
+      categories: _categories,
+      item: entry.item,
+      initialCategory: entry.item.category,
+    );
 
-                                setSheetState(() {
-                                  selectedProduct =
-                                      query.trim();
+    if (result == null || !mounted) {
+      return;
+    }
 
-                                  if (exactSuggestion !=
-                                      null) {
-                                    dialogCategory =
-                                        exactSuggestion
-                                            .category;
-                                  }
+    setState(() {
+      entry.item.name = result.name;
+      entry.item.quantity = result.quantity;
+      entry.item.unit = result.unit;
+      entry.item.category = result.category;
+      entry.item.note = result.note;
+    });
 
-                                  showDetails = true;
-                                });
-                              },
-                              child: const Text('Weiter'),
-                            ),
-                          ),
-                        ] else ...[
-                          Row(
-                            children: [
-                              Text(
-                                _suggestionForName(
-                                  selectedProduct ?? query,
-                                )?.emoji ??
-                                    '🛒',
-                                style: const TextStyle(
-                                  fontSize: 38,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  selectedProduct ?? query,
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleLarge,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextFormField(
-                                  key: const ValueKey(
-                                    'quantity',
-                                  ),
-                                  initialValue: quantity,
-                                  keyboardType:
-                                  const TextInputType
-                                      .numberWithOptions(
-                                    decimal: true,
-                                  ),
-                                  decoration:
-                                  const InputDecoration(
-                                    labelText: 'Menge',
-                                  ),
-                                  onChanged: (value) {
-                                    quantity = value;
-                                  },
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child:
-                                DropdownButtonFormField<
-                                    String>(
-                                  initialValue: dialogUnit,
-                                  isExpanded: true,
-                                  decoration:
-                                  const InputDecoration(
-                                    labelText: 'Einheit',
-                                  ),
-                                  items: units.map((unit) {
-                                    return DropdownMenuItem(
-                                      value: unit,
-                                      child: Text(unit),
-                                    );
-                                  }).toList(),
-                                  onChanged: (value) {
-                                    if (value == null) return;
+    await _saveLists();
+  }
 
-                                    setSheetState(() {
-                                      dialogUnit = value;
-                                    });
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          DropdownButtonFormField<String>(
-                            initialValue: dialogCategory,
-                            isExpanded: true,
-                            decoration:
-                            const InputDecoration(
-                              labelText: 'Kategorie',
-                            ),
-                            items: _categories.map((category) {
-                              return DropdownMenuItem(
-                                value: category,
-                                child: Text(category),
-                              );
-                            }).toList(),
-                            onChanged: (value) {
-                              if (value == null) return;
+  Future<void> _toggleFavorite(
+      _ShoppingEntry entry,
+      ) async {
+    setState(() {
+      entry.item.favorite = !entry.item.favorite;
+    });
 
-                              setSheetState(() {
-                                dialogCategory = value;
-                              });
-                            },
-                          ),
-                          const SizedBox(height: 16),
-                          TextFormField(
-                            key: const ValueKey('note'),
-                            initialValue: note,
-                            textCapitalization:
-                            TextCapitalization.sentences,
-                            maxLines: 2,
-                            decoration:
-                            const InputDecoration(
-                              labelText: 'Notiz',
-                              hintText: 'z. B. laktosefrei',
-                            ),
-                            onChanged: (value) {
-                              note = value;
-                            },
-                          ),
-                          if (!isEditing) ...[
-                            const SizedBox(height: 8),
-                            TextButton.icon(
-                              onPressed: () {
-                                setSheetState(() {
-                                  showDetails = false;
-                                  selectedProduct = null;
-                                });
-                              },
-                              icon: const Icon(
-                                Icons.arrow_back,
-                              ),
-                              label: const Text(
-                                'Anderen Artikel wählen',
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 16),
-                          SizedBox(
-                            width: double.infinity,
-                            child: FilledButton(
-                              onPressed: () async {
-                                final wasSaved =
-                                await _saveItem(
-                                  item: item,
-                                  name:
-                                  selectedProduct ?? query,
-                                  quantity: quantity,
-                                  unit: dialogUnit,
-                                  category: dialogCategory,
-                                  note: note,
-                                );
+    await _saveLists();
+  }
 
-                                if (wasSaved &&
-                                    sheetContext.mounted) {
-                                  Navigator.of(
-                                    sheetContext,
-                                  ).pop();
-                                }
-                              },
-                              child: const Text('Speichern'),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
+  Future<void> _moveToCart(
+      _ShoppingEntry entry,
+      ) async {
+    if (entry.item.done) {
+      return;
+    }
+
+    setState(() {
+      entry.item.done = true;
+      entry.item.purchaseCount++;
+      entry.item.lastPurchased = DateTime.now();
+    });
+
+    await _saveLists();
+
+    if (!mounted) return;
+
+    _showShortMessage(
+      '${entry.item.name} liegt jetzt im Einkaufswagen.',
+      action: SnackBarAction(
+        label: 'Rückgängig',
+        onPressed: () {
+          _restoreFromCart(entry);
+        },
+      ),
     );
   }
 
-  Future<bool> _saveItem({
-    required ShoppingItem? item,
-    required String name,
-    required String quantity,
-    required String unit,
-    required String category,
-    required String note,
-  }) async {
-    final cleanedName = name.trim();
-    final parsedQuantity = double.tryParse(
-      quantity.trim().replaceAll(',', '.'),
-    ) ??
-        1;
+  Future<void> _restoreFromCart(
+      _ShoppingEntry entry,
+      ) async {
+    final itemStillExists = entry.list.items.any(
+          (item) => item.id == entry.item.id,
+    );
 
-    if (cleanedName.isEmpty || parsedQuantity <= 0) {
-      return false;
+    if (!itemStillExists) {
+      return;
     }
 
     setState(() {
-      if (item == null) {
-        _items.add(
-          ShoppingItem(
-            id: _generateId(),
-            name: cleanedName,
-            quantity: parsedQuantity,
-            unit: unit,
-            category: category,
-            note: note.trim(),
-          ),
-        );
-      } else {
-        item.name = cleanedName;
-        item.quantity = parsedQuantity;
-        item.unit = unit;
-        item.category = category;
-        item.note = note.trim();
+      entry.item.done = false;
+
+      if (entry.item.purchaseCount > 0) {
+        entry.item.purchaseCount--;
       }
 
-      _sortItems();
+      entry.item.lastPurchased = null;
     });
 
-    await _saveItems();
-    return true;
-  }
-
-  Future<void> _toggleFavorite(int index) async {
-    setState(() {
-      _items[index].favorite =
-      !_items[index].favorite;
-      _sortItems();
-    });
-
-    await _saveItems();
+    await _saveLists();
   }
 
   Future<void> _toggleItem(
-      int index,
+      _ShoppingEntry entry,
       bool value,
       ) async {
-    final wasDone = _items[index].done;
+    if (value) {
+      await _moveToCart(entry);
+    } else {
+      await _restoreFromCart(entry);
+    }
+  }
+
+  Future<void> _deleteItem(
+      _ShoppingEntry entry,
+      ) async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Artikel löschen?'),
+          content: Text(
+            '„${entry.item.name}“ wird aus '
+                '„${entry.list.name}“ entfernt.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(false);
+              },
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(true);
+              },
+              child: const Text('Löschen'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldDelete != true || !mounted) {
+      return;
+    }
 
     setState(() {
-      _items[index].done = value;
+      entry.list.items.removeWhere(
+            (item) => item.id == entry.item.id,
+      );
+    });
 
-      if (value && !wasDone) {
-        _items[index].purchaseCount++;
-        _items[index].lastPurchased = DateTime.now();
+    await _saveLists();
+  }
+
+  Future<void> _finishShopping(
+      List<_ShoppingEntry> cartEntries,
+      ) async {
+    if (cartEntries.isEmpty) {
+      return;
+    }
+
+    final shouldFinish = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Einkauf abschließen?'),
+          content: Text(
+            '${cartEntries.length} Artikel werden aus '
+                'dem Einkaufswagen und den Einkaufslisten entfernt.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(false);
+              },
+              child: const Text('Abbrechen'),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.of(dialogContext).pop(true);
+              },
+              icon: const Icon(Icons.check),
+              label: const Text('Abschließen'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldFinish != true || !mounted) {
+      return;
+    }
+
+    final cartItemIds = cartEntries
+        .map((entry) => entry.item.id)
+        .toSet();
+
+    setState(() {
+      for (final list in _lists) {
+        list.items.removeWhere(
+              (item) => cartItemIds.contains(item.id),
+        );
       }
     });
 
-    await _saveItems();
+    await _saveLists();
+
+    if (!mounted) return;
+
+    _showShortMessage(
+      'Einkauf abgeschlossen.',
+    );
   }
 
-  Future<void> _deleteItem(int index) async {
-    setState(() {
-      _items.removeAt(index);
+  List<_ShoppingEntry> _filteredEntries() {
+    final entries = _allEntries.where((entry) {
+      final matchesSearch = entry.item.name
+          .toLowerCase()
+          .contains(_search);
+
+      final matchesCategory =
+          _selectedCategory == null ||
+              entry.item.category == _selectedCategory;
+
+      return matchesSearch && matchesCategory;
+    }).toList();
+
+    entries.sort((a, b) {
+      final categoryComparison = _categoryIndex(
+        a.item.category,
+      ).compareTo(
+        _categoryIndex(b.item.category),
+      );
+
+      if (categoryComparison != 0) {
+        return categoryComparison;
+      }
+
+      if (a.item.favorite != b.item.favorite) {
+        return a.item.favorite ? -1 : 1;
+      }
+
+      final nameComparison = a.item.name
+          .toLowerCase()
+          .compareTo(
+        b.item.name.toLowerCase(),
+      );
+
+      if (nameComparison != 0) {
+        return nameComparison;
+      }
+
+      return a.list.name
+          .toLowerCase()
+          .compareTo(
+        b.list.name.toLowerCase(),
+      );
     });
 
-    await _saveItems();
+    return entries;
   }
 
-  List<Widget> _buildGroupedItems(
+  List<Widget> _buildGroupedEntries(
       BuildContext context,
-      List<ShoppingItem> shoppingItems,
+      List<_ShoppingEntry> entries,
       ) {
-    final groupedItems =
-    <String, List<ShoppingItem>>{};
+    final groupedEntries =
+    <String, List<_ShoppingEntry>>{};
 
-    for (final item in shoppingItems) {
-      groupedItems.putIfAbsent(
-        item.category,
+    for (final entry in entries) {
+      groupedEntries.putIfAbsent(
+        entry.item.category,
             () => [],
       );
-      groupedItems[item.category]!.add(item);
+
+      groupedEntries[entry.item.category]!.add(entry);
     }
 
     final visibleCategories =
-    groupedItems.keys.toList()
+    groupedEntries.keys.toList()
       ..sort(
             (a, b) => _categoryIndex(a).compareTo(
           _categoryIndex(b),
@@ -819,7 +572,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
       );
 
     return visibleCategories.expand((category) {
-      final categoryItems = groupedItems[category]!;
+      final categoryEntries = groupedEntries[category]!;
 
       return [
         Padding(
@@ -829,36 +582,169 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
           ),
           child: Text(
             category,
-            style:
-            Theme.of(context).textTheme.titleMedium,
+            style: Theme.of(context).textTheme.titleMedium,
           ),
         ),
-        ...categoryItems.map((item) {
-          final index = _items.indexOf(item);
-
-          return ShoppingTile(
-            item: item,
-            onChanged: (value) {
-              _toggleItem(
-                index,
-                value ?? false,
-              );
-            },
-            onDelete: () => _deleteItem(index),
-            onFavorite: () => _toggleFavorite(index),
-            onTap: () => _showItemDialog(item: item),
-          );
-        }),
+        ...categoryEntries.map(
+              (entry) => _buildEntryCard(
+            context,
+            entry,
+          ),
+        ),
       ];
     }).toList();
   }
 
+  Widget _buildEntryCard(
+      BuildContext context,
+      _ShoppingEntry entry,
+      ) {
+    final item = entry.item;
+
+    final titleStyle = TextStyle(
+      fontWeight:
+      item.favorite ? FontWeight.bold : FontWeight.w600,
+      decoration: item.done
+          ? TextDecoration.lineThrough
+          : TextDecoration.none,
+    );
+
+    final subtitleStyle = TextStyle(
+      decoration: item.done
+          ? TextDecoration.lineThrough
+          : TextDecoration.none,
+    );
+
+    final quantityText =
+        '${_formatQuantity(item.quantity)} ${item.unit}';
+
+    final detailsText = item.note.trim().isEmpty
+        ? quantityText
+        : '$quantityText • ${item.note}';
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 5),
+      child: ListTile(
+        onTap: () {
+          _showEditItemDialog(entry);
+        },
+        leading: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _emojiForItem(item),
+              style: const TextStyle(fontSize: 24),
+            ),
+            const SizedBox(width: 4),
+            Checkbox(
+              value: item.done,
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize:
+              MaterialTapTargetSize.shrinkWrap,
+              onChanged: (value) {
+                _toggleItem(
+                  entry,
+                  value ?? false,
+                );
+              },
+            ),
+          ],
+        ),
+        title: Text(
+          item.name,
+          style: titleStyle,
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              detailsText,
+              style: subtitleStyle,
+            ),
+            const SizedBox(height: 3),
+            Row(
+              children: [
+                const Icon(
+                  Icons.list_alt,
+                  size: 15,
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    entry.list.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+        trailing: PopupMenuButton<_ItemAction>(
+          tooltip: 'Optionen',
+          onSelected: (action) {
+            if (action == _ItemAction.favorite) {
+              _toggleFavorite(entry);
+            } else if (action == _ItemAction.edit) {
+              _showEditItemDialog(entry);
+            } else if (action == _ItemAction.delete) {
+              _deleteItem(entry);
+            }
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: _ItemAction.favorite,
+              child: Row(
+                children: [
+                  Icon(
+                    item.favorite
+                        ? Icons.star
+                        : Icons.star_border,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    item.favorite
+                        ? 'Favorit entfernen'
+                        : 'Als Favorit markieren',
+                  ),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: _ItemAction.edit,
+              child: Row(
+                children: [
+                  Icon(Icons.edit_outlined),
+                  SizedBox(width: 12),
+                  Text('Bearbeiten'),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: _ItemAction.delete,
+              child: Row(
+                children: [
+                  Icon(Icons.delete_outline),
+                  SizedBox(width: 12),
+                  Text('Löschen'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildProgressCard({
-    required int completedCount,
+    required int cartCount,
     required int totalCount,
   }) {
     final progress =
-    totalCount == 0 ? 0.0 : completedCount / totalCount;
+    totalCount == 0 ? 0.0 : cartCount / totalCount;
 
     return Card(
       margin: const EdgeInsets.only(top: 16),
@@ -874,8 +760,8 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    '$completedCount von $totalCount '
-                        'Artikeln erledigt',
+                    '$cartCount von $totalCount Artikeln '
+                        'im Einkaufswagen',
                     style: const TextStyle(
                       fontWeight: FontWeight.bold,
                     ),
@@ -890,8 +776,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
             LinearProgressIndicator(
               value: progress,
               minHeight: 8,
-              borderRadius:
-              BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(20),
             ),
           ],
         ),
@@ -899,7 +784,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
     );
   }
 
-  Widget _buildListSelector() {
+  Widget _buildTargetListSelector() {
     if (_lists.isEmpty) {
       return Card(
         child: ListTile(
@@ -930,14 +815,14 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
         ),
         child: Row(
           children: [
-            const Icon(Icons.list_alt),
+            const Icon(Icons.playlist_add),
             const SizedBox(width: 12),
             Expanded(
               child: DropdownButtonFormField<String>(
-                initialValue: _selectedListId,
+                initialValue: _selectedTargetListId,
                 isExpanded: true,
                 decoration: const InputDecoration(
-                  labelText: 'Einkaufsliste',
+                  labelText: 'Neue Artikel hinzufügen zu',
                   border: InputBorder.none,
                 ),
                 items: _lists.map((list) {
@@ -953,7 +838,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                     ),
                   );
                 }).toList(),
-                onChanged: _selectList,
+                onChanged: _selectTargetList,
               ),
             ),
             IconButton(
@@ -964,9 +849,12 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
               tooltip: 'Einkaufslisten verwalten',
             ),
             IconButton(
-              onPressed: () => _loadLists(
-                preferredListId: _selectedListId,
-              ),
+              onPressed: () {
+                _loadLists(
+                  preferredTargetListId:
+                  _selectedTargetListId,
+                );
+              },
               icon: const Icon(Icons.refresh),
               tooltip: 'Neu laden',
             ),
@@ -976,25 +864,65 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
     );
   }
 
+  Widget _buildCartSection(
+      BuildContext context,
+      List<_ShoppingEntry> cartEntries,
+      ) {
+    if (cartEntries.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Card(
+      margin: const EdgeInsets.only(top: 20),
+      child: ExpansionTile(
+        initiallyExpanded: true,
+        leading: const Icon(Icons.shopping_cart),
+        title: Text(
+          'Im Einkaufswagen (${cartEntries.length})',
+        ),
+        subtitle: const Text(
+          'Artikel können zurückgelegt oder '
+              'gemeinsam abgeschlossen werden.',
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(
+          16,
+          0,
+          16,
+          16,
+        ),
+        children: [
+          ..._buildGroupedEntries(
+            context,
+            cartEntries,
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: () {
+                _finishShopping(cartEntries);
+              },
+              icon: const Icon(Icons.done_all),
+              label: const Text(
+                'Einkauf abschließen',
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final filteredItems = _items.where((item) {
-      final matchesSearch =
-      item.name.toLowerCase().contains(_search);
+    final filteredEntries = _filteredEntries();
 
-      final matchesCategory =
-          _selectedCategory == null ||
-              item.category == _selectedCategory;
-
-      return matchesSearch && matchesCategory;
-    }).toList();
-
-    final openItems = filteredItems
-        .where((item) => !item.done)
+    final openEntries = filteredEntries
+        .where((entry) => !entry.item.done)
         .toList();
 
-    final completedItems = filteredItems
-        .where((item) => item.done)
+    final cartEntries = filteredEntries
+        .where((entry) => entry.item.done)
         .toList();
 
     return Scaffold(
@@ -1018,9 +946,9 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
       ),
       floatingActionButton:
       FloatingActionButton.extended(
-        onPressed: _selectedList == null
+        onPressed: _selectedTargetList == null
             ? null
-            : () => _showItemDialog(),
+            : _showNewItemDialog,
         icon: const Icon(Icons.add),
         label: const Text('Artikel'),
       ),
@@ -1030,7 +958,8 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
       )
           : RefreshIndicator(
         onRefresh: () => _loadLists(
-          preferredListId: _selectedListId,
+          preferredTargetListId:
+          _selectedTargetListId,
         ),
         child: ListView(
           physics:
@@ -1042,23 +971,24 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
             180,
           ),
           children: [
-            _buildListSelector(),
+            _buildTargetListSelector(),
             const SizedBox(height: 12),
             TextField(
               controller: _searchController,
-              enabled: _selectedList != null,
+              enabled: _lists.isNotEmpty,
               decoration: const InputDecoration(
                 prefixIcon: Icon(Icons.search),
-                hintText: 'Artikel suchen...',
+                hintText:
+                'In allen Listen suchen...',
               ),
             ),
             const SectionTitle(
               title: '⭐ Häufig gekauft',
             ),
             FrequentItems(
-              items: _items,
+              items: _allItems,
               onTap: (name) {
-                _showItemDialog(
+                _showNewItemDialog(
                   initialName: name,
                 );
               },
@@ -1099,16 +1029,15 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
               ],
             ),
             _buildProgressCard(
-              completedCount:
-              completedItems.length,
+              cartCount: cartEntries.length,
               totalCount:
-              filteredItems.length,
+              filteredEntries.length,
             ),
             SectionTitle(
               title:
-              '🛒 Noch zu kaufen (${openItems.length})',
+              '🛒 Noch zu kaufen (${openEntries.length})',
             ),
-            if (_selectedList == null)
+            if (_lists.isEmpty)
               const Padding(
                 padding: EdgeInsets.all(24),
                 child: Center(
@@ -1118,50 +1047,24 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
                   ),
                 ),
               )
-            else if (openItems.isEmpty)
+            else if (openEntries.isEmpty)
               const Padding(
                 padding: EdgeInsets.all(24),
                 child: Center(
                   child: Text(
-                    'Alles erledigt – '
-                        'die Liste ist leer. 🎉',
+                    'Keine offenen Artikel mehr. 🎉',
                   ),
                 ),
               )
             else
-              ..._buildGroupedItems(
+              ..._buildGroupedEntries(
                 context,
-                openItems,
+                openEntries,
               ),
-            if (completedItems.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Card(
-                child: ExpansionTile(
-                  leading: const Icon(
-                    Icons.check_circle_outline,
-                  ),
-                  title: Text(
-                    'Erledigt '
-                        '(${completedItems.length})',
-                  ),
-                  subtitle: const Text(
-                    'Antippen, um gekaufte '
-                        'Artikel zu sehen',
-                  ),
-                  childrenPadding:
-                  const EdgeInsets.fromLTRB(
-                    16,
-                    0,
-                    16,
-                    12,
-                  ),
-                  children: _buildGroupedItems(
-                    context,
-                    completedItems,
-                  ),
-                ),
-              ),
-            ],
+            _buildCartSection(
+              context,
+              cartEntries,
+            ),
           ],
         ),
       ),
@@ -1169,14 +1072,18 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
   }
 }
 
-extension _IterableFirstOrNullExtension<T> on Iterable<T> {
-  T? get firstOrNull {
-    final iterator = this.iterator;
+class _ShoppingEntry {
+  const _ShoppingEntry({
+    required this.list,
+    required this.item,
+  });
 
-    if (!iterator.moveNext()) {
-      return null;
-    }
+  final ShoppingList list;
+  final ShoppingItem item;
+}
 
-    return iterator.current;
-  }
+enum _ItemAction {
+  favorite,
+  edit,
+  delete,
 }

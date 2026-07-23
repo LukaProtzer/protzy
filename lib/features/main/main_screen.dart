@@ -15,27 +15,34 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
-
-  final List<Widget> _pages = const [
-    HomeScreen(),
-    ShoppingScreen(),
-    InventoryScreen(),
-    HouseholdScreen(),
-    SettingsScreen(),
-  ];
+  int _shoppingRefreshToken = 0;
 
   @override
   Widget build(BuildContext context) {
+    final pages = <Widget>[
+      const HomeScreen(),
+      ShoppingScreen(
+        refreshToken: _shoppingRefreshToken,
+      ),
+      const InventoryScreen(),
+      const HouseholdScreen(),
+      const SettingsScreen(),
+    ];
+
     return Scaffold(
       body: IndexedStack(
         index: _currentIndex,
-        children: _pages,
+        children: pages,
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex,
         onDestinationSelected: (index) {
           setState(() {
             _currentIndex = index;
+
+            if (index == 1) {
+              _shoppingRefreshToken++;
+            }
           });
         },
         destinations: const [
