@@ -11,7 +11,6 @@ import 'shopping_list.dart';
 import 'shopping_lists_screen.dart';
 import 'shopping_service.dart';
 import 'widgets/frequent_items.dart';
-import 'widgets/section_title.dart';
 import 'widgets/shopping_item_sheet.dart';
 
 class ShoppingScreen extends StatefulWidget {
@@ -28,7 +27,8 @@ class ShoppingScreen extends StatefulWidget {
 
 class _ShoppingScreenState extends State<ShoppingScreen> {
   final ShoppingService _service = ShoppingService();
-  final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _searchController =
+  TextEditingController();
 
   List<ShoppingList> _lists = [];
 
@@ -38,6 +38,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
 
   bool _isLoading = true;
   bool _isSaving = false;
+  bool _showAllCategories = false;
 
   ShoppingList? get _selectedTargetList {
     final selectedId = _selectedTargetListId;
@@ -70,6 +71,18 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
     return [
       for (final list in _lists) ...list.items,
     ];
+  }
+
+  List<_ShoppingEntry> get _allCartEntries {
+    return _allEntries
+        .where((entry) => entry.item.done)
+        .toList();
+  }
+
+  List<_ShoppingEntry> get _allOpenEntries {
+    return _allEntries
+        .where((entry) => !entry.item.done)
+        .toList();
   }
 
   @override
@@ -138,24 +151,6 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
       _selectedTargetListId = nextTargetListId;
       _selectedCategory = null;
       _isLoading = false;
-    });
-  }
-
-  void _selectTargetList(String? listId) {
-    if (listId == null || listId == _selectedTargetListId) {
-      return;
-    }
-
-    final exists = _lists.any(
-          (list) => list.id == listId,
-    );
-
-    if (!exists) {
-      return;
-    }
-
-    setState(() {
-      _selectedTargetListId = listId;
     });
   }
 
@@ -228,6 +223,14 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
       for (final category in categories)
         if (category.trim().isNotEmpty) category.trim(),
     }.toList();
+  }
+
+  List<String> get _visibleCategories {
+    if (_showAllCategories) {
+      return _categories;
+    }
+
+    return _categories.take(6).toList();
   }
 
   int _categoryIndex(String category) {
@@ -470,7 +473,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
           content: Text(
             '${cartEntries.length} Artikel werden aus dem '
                 'Einkaufswagen entfernt und dauerhaft in der '
-                'Einkaufshistorie gespeichert.',
+                'Historie gespeichert.',
           ),
           actions: [
             TextButton(
@@ -500,7 +503,6 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
     });
 
     final completedAt = DateTime.now();
-
     final sourceLists = <String, ShoppingList>{};
 
     for (final entry in cartEntries) {
@@ -522,9 +524,8 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
       )
           .toList(),
       sourceListIds: sourceLists.keys.toList(),
-      sourceListNames: sourceLists.values
-          .map((list) => list.name)
-          .toList(),
+      sourceListNames:
+      sourceLists.values.map((list) => list.name).toList(),
     );
 
     final cartItemIds = cartEntries
@@ -598,9 +599,7 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
 
       final nameComparison = a.item.name
           .toLowerCase()
-          .compareTo(
-        b.item.name.toLowerCase(),
-      );
+          .compareTo(b.item.name.toLowerCase());
 
       if (nameComparison != 0) {
         return nameComparison;
@@ -608,12 +607,490 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
 
       return a.list.name
           .toLowerCase()
-          .compareTo(
-        b.list.name.toLowerCase(),
-      );
+          .compareTo(b.list.name.toLowerCase());
     });
 
     return entries;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filteredEntries = _filteredEntries();
+
+    final openEntries = filteredEntries
+        .where((entry) => !entry.item.done)
+        .toList();
+
+    final visibleCartEntries = filteredEntries
+        .where((entry) => entry.item.done)
+        .toList();
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Einkauf'),
+        actions: [
+          IconButton(
+            onPressed: _openHistory,
+            icon: const Icon(Icons.history_rounded),
+            tooltip: 'Einkaufshistorie',
+          ),
+          if (_isSaving)
+            const Padding(
+              padding: EdgeInsets.only(right: 16),
+              child: Center(
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(
+        child: CircularProgressIndicator(),
+      )
+          : RefreshIndicator(
+        onRefresh: () => _loadLists(
+          preferredTargetListId:
+          _selectedTargetListId,
+        ),
+        child: ListView(
+          physics:
+          const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(
+            16,
+            8,
+            16,
+            160,
+          ),
+          children: [
+            _buildHeroCard(context),
+            const SizedBox(height: 14),
+            _buildSearchField(context),
+            const SizedBox(height: 18),
+            _buildQuickArea(context),
+            const SizedBox(height: 18),
+            _buildCategoryArea(context),
+            const SizedBox(height: 22),
+            _buildSectionHeader(
+              context,
+              title: 'Noch zu kaufen',
+              count: openEntries.length,
+              icon: Icons.shopping_basket_outlined,
+            ),
+            const SizedBox(height: 10),
+            if (_lists.isEmpty)
+              _buildEmptyState(
+                context,
+                icon: Icons.playlist_add,
+                title: 'Noch keine Einkaufsliste',
+                text:
+                'Erstelle zuerst eine Liste und füge Artikel hinzu.',
+                buttonText: 'Liste erstellen',
+                onPressed: _openListManagement,
+              )
+            else if (openEntries.isEmpty)
+              _buildEmptyState(
+                context,
+                icon: Icons.check_circle_outline,
+                title: 'Alles erledigt',
+                text:
+                'Aktuell sind keine offenen Artikel vorhanden.',
+              )
+            else
+              ..._buildGroupedEntries(
+                context,
+                openEntries,
+              ),
+            if (_allCartEntries.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              _buildCartSection(
+                context,
+                visibleCartEntries,
+                _allCartEntries,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeroCard(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final targetList = _selectedTargetList;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(26),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(17),
+                ),
+                child: Icon(
+                  Icons.playlist_add,
+                  color: colorScheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Neue Artikel gehen zu',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      targetList?.name ?? 'Keine Liste',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuButton<String>(
+                enabled: _lists.isNotEmpty,
+                tooltip: 'Zielliste auswählen',
+                onSelected: (listId) {
+                  setState(() {
+                    _selectedTargetListId = listId;
+                  });
+                },
+                itemBuilder: (context) {
+                  return _lists.map((list) {
+                    return PopupMenuItem(
+                      value: list.id,
+                      child: Row(
+                        children: [
+                          if (list.id == _selectedTargetListId)
+                            const Icon(Icons.check),
+                          if (list.id == _selectedTargetListId)
+                            const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(list.name),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList();
+                },
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: colorScheme.surface,
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: const Icon(
+                    Icons.expand_more,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton.filledTonal(
+                onPressed: _openListManagement,
+                icon: const Icon(Icons.settings_outlined),
+                tooltip: 'Listen verwalten',
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatPill(
+                  context,
+                  icon: Icons.shopping_basket_outlined,
+                  value: '${_allOpenEntries.length}',
+                  label: 'offen',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildStatPill(
+                  context,
+                  icon: Icons.shopping_cart_outlined,
+                  value: '${_allCartEntries.length}',
+                  label: 'im Wagen',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildStatPill(
+                  context,
+                  icon: Icons.list_alt,
+                  value: '${_lists.length}',
+                  label: 'Listen',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: FilledButton.icon(
+              onPressed: _selectedTargetList == null
+                  ? null
+                  : _showNewItemDialog,
+              icon: const Icon(Icons.add),
+              label: const Text('Artikel hinzufügen'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatPill(
+      BuildContext context, {
+        required IconData icon,
+        required String value,
+        required String label,
+      }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 12,
+      ),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            icon,
+            size: 20,
+            color: colorScheme.primary,
+          ),
+          const SizedBox(height: 5),
+          Text(
+            value,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchField(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: TextField(
+        controller: _searchController,
+        enabled: _lists.isNotEmpty,
+        decoration: InputDecoration(
+          hintText: 'In allen Listen suchen',
+          prefixIcon: const Icon(Icons.search),
+          suffixIcon: _searchController.text.isEmpty
+              ? null
+              : IconButton(
+            onPressed: () {
+              _searchController.clear();
+            },
+            icon: const Icon(Icons.close),
+          ),
+          border: InputBorder.none,
+          filled: false,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildQuickArea(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.star_outline),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Häufig gekauft',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          FrequentItems(
+            items: _allItems,
+            onTap: (name) {
+              _showNewItemDialog(
+                initialName: name,
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryArea(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.category_outlined),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Kategorien',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _showAllCategories =
+                    !_showAllCategories;
+                  });
+                },
+                child: Text(
+                  _showAllCategories
+                      ? 'Weniger'
+                      : 'Alle anzeigen',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              ChoiceChip(
+                label: const Text('Alle'),
+                selected: _selectedCategory == null,
+                onSelected: (_) {
+                  setState(() {
+                    _selectedCategory = null;
+                  });
+                },
+              ),
+              ..._visibleCategories.map(
+                    (category) => ChoiceChip(
+                  label: Text(category),
+                  selected:
+                  _selectedCategory == category,
+                  onSelected: (selected) {
+                    setState(() {
+                      _selectedCategory =
+                      selected ? category : null;
+                    });
+                  },
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(
+      BuildContext context, {
+        required String title,
+        required int count,
+        required IconData icon,
+      }) {
+    final theme = Theme.of(context);
+
+    return Row(
+      children: [
+        Icon(icon),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: 10,
+            vertical: 5,
+          ),
+          decoration: BoxDecoration(
+            color: Theme.of(context)
+                .colorScheme
+                .primaryContainer,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            '$count',
+            style: const TextStyle(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   List<Widget> _buildGroupedEntries(
@@ -647,11 +1124,19 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
         Padding(
           padding: const EdgeInsets.only(
             top: 12,
-            bottom: 4,
+            bottom: 6,
           ),
           child: Text(
             category,
-            style: Theme.of(context).textTheme.titleMedium,
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: Theme.of(context)
+                  .colorScheme
+                  .onSurfaceVariant,
+            ),
           ),
         ),
         ...categoryEntries.map(
@@ -669,20 +1154,8 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
       _ShoppingEntry entry,
       ) {
     final item = entry.item;
-
-    final titleStyle = TextStyle(
-      fontWeight:
-      item.favorite ? FontWeight.bold : FontWeight.w600,
-      decoration: item.done
-          ? TextDecoration.lineThrough
-          : TextDecoration.none,
-    );
-
-    final subtitleStyle = TextStyle(
-      decoration: item.done
-          ? TextDecoration.lineThrough
-          : TextDecoration.none,
-    );
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     final quantityText =
         '${_formatQuantity(item.quantity)} ${item.unit}';
@@ -691,243 +1164,165 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
         ? quantityText
         : '$quantityText • ${item.note}';
 
-    return Card(
-      margin: const EdgeInsets.symmetric(vertical: 5),
-      child: ListTile(
-        onTap: () {
-          _showEditItemDialog(entry);
-        },
-        leading: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              _emojiForItem(item),
-              style: const TextStyle(fontSize: 24),
-            ),
-            const SizedBox(width: 4),
-            Checkbox(
-              value: item.done,
-              visualDensity: VisualDensity.compact,
-              materialTapTargetSize:
-              MaterialTapTargetSize.shrinkWrap,
-              onChanged: (value) {
-                _toggleItem(
-                  entry,
-                  value ?? false,
-                );
-              },
-            ),
-          ],
-        ),
-        title: Text(
-          item.name,
-          style: titleStyle,
-        ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              detailsText,
-              style: subtitleStyle,
-            ),
-            const SizedBox(height: 3),
-            Row(
-              children: [
-                const Icon(
-                  Icons.list_alt,
-                  size: 15,
-                ),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    entry.list.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-        trailing: PopupMenuButton<_ItemAction>(
-          tooltip: 'Optionen',
-          onSelected: (action) {
-            if (action == _ItemAction.favorite) {
-              _toggleFavorite(entry);
-            } else if (action == _ItemAction.edit) {
-              _showEditItemDialog(entry);
-            } else if (action == _ItemAction.delete) {
-              _deleteItem(entry);
-            }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(22),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(22),
+          onTap: () {
+            _showEditItemDialog(entry);
           },
-          itemBuilder: (context) => [
-            PopupMenuItem(
-              value: _ItemAction.favorite,
-              child: Row(
-                children: [
-                  Icon(
-                    item.favorite
-                        ? Icons.star
-                        : Icons.star_border,
-                  ),
-                  const SizedBox(width: 12),
-                  Text(
-                    item.favorite
-                        ? 'Favorit entfernen'
-                        : 'Als Favorit markieren',
-                  ),
-                ],
-              ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              14,
+              12,
+              8,
+              12,
             ),
-            const PopupMenuItem(
-              value: _ItemAction.edit,
-              child: Row(
-                children: [
-                  Icon(Icons.edit_outlined),
-                  SizedBox(width: 12),
-                  Text('Bearbeiten'),
-                ],
-              ),
-            ),
-            const PopupMenuItem(
-              value: _ItemAction.delete,
-              child: Row(
-                children: [
-                  Icon(Icons.delete_outline),
-                  SizedBox(width: 12),
-                  Text('Löschen'),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildProgressCard({
-    required int cartCount,
-    required int totalCount,
-  }) {
-    final progress =
-    totalCount == 0 ? 0.0 : cartCount / totalCount;
-
-    return Card(
-      margin: const EdgeInsets.only(top: 16),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Row(
+            child: Row(
               children: [
-                const Icon(
-                  Icons.shopping_cart_outlined,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    '$cartCount von $totalCount Artikeln '
-                        'im Einkaufswagen',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: colorScheme.surface,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Center(
+                    child: Text(
+                      _emojiForItem(item),
+                      style: const TextStyle(fontSize: 25),
                     ),
                   ),
                 ),
-                Text(
-                  '${(progress * 100).round()} %',
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              item.name,
+                              style: theme.textTheme.titleMedium
+                                  ?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                decoration: item.done
+                                    ? TextDecoration.lineThrough
+                                    : TextDecoration.none,
+                              ),
+                            ),
+                          ),
+                          if (item.favorite)
+                            const Icon(
+                              Icons.star,
+                              size: 18,
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        detailsText,
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(
+                          color:
+                          colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.list_alt,
+                            size: 14,
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              entry.list.name,
+                              maxLines: 1,
+                              overflow:
+                              TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall
+                                  ?.copyWith(
+                                color: colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                Checkbox(
+                  value: item.done,
+                  onChanged: (value) {
+                    _toggleItem(
+                      entry,
+                      value ?? false,
+                    );
+                  },
+                ),
+                PopupMenuButton<_ItemAction>(
+                  tooltip: 'Optionen',
+                  onSelected: (action) {
+                    if (action == _ItemAction.favorite) {
+                      _toggleFavorite(entry);
+                    } else if (action == _ItemAction.edit) {
+                      _showEditItemDialog(entry);
+                    } else if (action == _ItemAction.delete) {
+                      _deleteItem(entry);
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: _ItemAction.favorite,
+                      child: Row(
+                        children: [
+                          Icon(
+                            item.favorite
+                                ? Icons.star
+                                : Icons.star_border,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            item.favorite
+                                ? 'Favorit entfernen'
+                                : 'Als Favorit markieren',
+                          ),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: _ItemAction.edit,
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit_outlined),
+                          SizedBox(width: 12),
+                          Text('Bearbeiten'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: _ItemAction.delete,
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline),
+                          SizedBox(width: 12),
+                          Text('Löschen'),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            LinearProgressIndicator(
-              value: progress,
-              minHeight: 8,
-              borderRadius: BorderRadius.circular(20),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTargetListSelector() {
-    if (_lists.isEmpty) {
-      return Card(
-        child: ListTile(
-          leading: const Icon(
-            Icons.playlist_add,
           ),
-          title: const Text(
-            'Noch keine Einkaufsliste',
-          ),
-          subtitle: const Text(
-            'Erstelle zuerst eine Liste.',
-          ),
-          trailing: FilledButton(
-            onPressed: _openListManagement,
-            child: const Text('Erstellen'),
-          ),
-        ),
-      );
-    }
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          16,
-          8,
-          8,
-          8,
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.playlist_add),
-            const SizedBox(width: 12),
-            Expanded(
-              child: DropdownButtonFormField<String>(
-                initialValue: _selectedTargetListId,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'Neue Artikel hinzufügen zu',
-                  border: InputBorder.none,
-                ),
-                items: _lists.map((list) {
-                  final openItems = list.items
-                      .where((item) => !item.done)
-                      .length;
-
-                  return DropdownMenuItem(
-                    value: list.id,
-                    child: Text(
-                      '${list.name} ($openItems offen)',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  );
-                }).toList(),
-                onChanged: _selectTargetList,
-              ),
-            ),
-            IconButton(
-              onPressed: _openListManagement,
-              icon: const Icon(
-                Icons.settings_outlined,
-              ),
-              tooltip: 'Einkaufslisten verwalten',
-            ),
-            IconButton(
-              onPressed: () {
-                _loadLists(
-                  preferredTargetListId:
-                  _selectedTargetListId,
-                );
-              },
-              icon: const Icon(Icons.refresh),
-              tooltip: 'Neu laden',
-            ),
-          ],
         ),
       ),
     );
@@ -938,41 +1333,66 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
       List<_ShoppingEntry> visibleCartEntries,
       List<_ShoppingEntry> allCartEntries,
       ) {
-    if (allCartEntries.isEmpty) {
-      return const SizedBox.shrink();
-    }
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
-    return Card(
-      margin: const EdgeInsets.only(top: 20),
-      child: ExpansionTile(
-        initiallyExpanded: true,
-        leading: const Icon(Icons.shopping_cart),
-        title: Text(
-          'Im Einkaufswagen (${allCartEntries.length})',
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.primaryContainer.withValues(
+          alpha: 0.42,
         ),
-        subtitle: visibleCartEntries.length == allCartEntries.length
-            ? const Text(
-          'Artikel können zurückgelegt oder '
-              'gemeinsam abgeschlossen werden.',
-        )
-            : Text(
-          '${visibleCartEntries.length} von '
-              '${allCartEntries.length} Artikeln sichtbar',
-        ),
-        childrenPadding: const EdgeInsets.fromLTRB(
-          16,
-          0,
-          16,
-          16,
-        ),
+        borderRadius: BorderRadius.circular(26),
+      ),
+      child: Column(
         children: [
+          Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: colorScheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(Icons.shopping_cart),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment:
+                  CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Im Einkaufswagen',
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    Text(
+                      '${allCartEntries.length} Artikel bereit',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
           if (visibleCartEntries.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 20),
+            Padding(
+              padding: const EdgeInsets.symmetric(
+                vertical: 12,
+              ),
               child: Text(
-                'Der Einkaufswagen enthält Artikel, '
-                    'die nicht zum aktuellen Filter passen.',
+                'Die Artikel im Einkaufswagen passen nicht '
+                    'zum aktuellen Filter.',
                 textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
             )
           else
@@ -980,9 +1400,10 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
               context,
               visibleCartEntries,
             ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           SizedBox(
             width: double.infinity,
+            height: 54,
             child: FilledButton.icon(
               onPressed: _isSaving
                   ? null
@@ -1001,169 +1422,53 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final filteredEntries = _filteredEntries();
+  Widget _buildEmptyState(
+      BuildContext context, {
+        required IconData icon,
+        required String title,
+        required String text,
+        String? buttonText,
+        VoidCallback? onPressed,
+      }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
-    final openEntries = filteredEntries
-        .where((entry) => !entry.item.done)
-        .toList();
-
-    final visibleCartEntries = filteredEntries
-        .where((entry) => entry.item.done)
-        .toList();
-
-    final allCartEntries = _allEntries
-        .where((entry) => entry.item.done)
-        .toList();
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Einkauf'),
-        actions: [
-          IconButton(
-            onPressed: _openHistory,
-            icon: const Icon(Icons.history),
-            tooltip: 'Einkaufshistorie',
-          ),
-          if (_isSaving)
-            const Padding(
-              padding: EdgeInsets.only(right: 16),
-              child: Center(
-                child: SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                  ),
-                ),
-              ),
-            ),
-        ],
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(24),
       ),
-      floatingActionButton:
-      FloatingActionButton.extended(
-        onPressed: _selectedTargetList == null
-            ? null
-            : _showNewItemDialog,
-        icon: const Icon(Icons.add),
-        label: const Text('Artikel'),
-      ),
-      body: _isLoading
-          ? const Center(
-        child: CircularProgressIndicator(),
-      )
-          : RefreshIndicator(
-        onRefresh: () => _loadLists(
-          preferredTargetListId:
-          _selectedTargetListId,
-        ),
-        child: ListView(
-          physics:
-          const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(
-            16,
-            16,
-            16,
-            180,
+      child: Column(
+        children: [
+          Icon(
+            icon,
+            size: 44,
+            color: colorScheme.primary,
           ),
-          children: [
-            _buildTargetListSelector(),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _searchController,
-              enabled: _lists.isNotEmpty,
-              decoration: const InputDecoration(
-                prefixIcon: Icon(Icons.search),
-                hintText:
-                'In allen Listen suchen...',
-              ),
+          const SizedBox(height: 12),
+          Text(
+            title,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
             ),
-            const SectionTitle(
-              title: '⭐ Häufig gekauft',
+          ),
+          const SizedBox(height: 5),
+          Text(
+            text,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
             ),
-            FrequentItems(
-              items: _allItems,
-              onTap: (name) {
-                _showNewItemDialog(
-                  initialName: name,
-                );
-              },
-            ),
-            const SectionTitle(
-              title: '🗂 Kategorien',
-            ),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ChoiceChip(
-                  label: const Text('Alle'),
-                  selected:
-                  _selectedCategory == null,
-                  onSelected: (_) {
-                    setState(() {
-                      _selectedCategory = null;
-                    });
-                  },
-                ),
-                ..._categories.map(
-                      (category) => ChoiceChip(
-                    label: Text(category),
-                    selected:
-                    _selectedCategory ==
-                        category,
-                    onSelected: (selected) {
-                      setState(() {
-                        _selectedCategory =
-                        selected
-                            ? category
-                            : null;
-                      });
-                    },
-                  ),
-                ),
-              ],
-            ),
-            _buildProgressCard(
-              cartCount: allCartEntries.length,
-              totalCount: _allEntries.length,
-            ),
-            SectionTitle(
-              title:
-              '🛒 Noch zu kaufen (${openEntries.length})',
-            ),
-            if (_lists.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(
-                  child: Text(
-                    'Erstelle zuerst eine '
-                        'Einkaufsliste.',
-                  ),
-                ),
-              )
-            else if (openEntries.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(
-                  child: Text(
-                    'Keine offenen Artikel mehr. 🎉',
-                  ),
-                ),
-              )
-            else
-              ..._buildGroupedEntries(
-                context,
-                openEntries,
-              ),
-            _buildCartSection(
-              context,
-              visibleCartEntries,
-              allCartEntries,
+          ),
+          if (buttonText != null && onPressed != null) ...[
+            const SizedBox(height: 14),
+            FilledButton.tonal(
+              onPressed: onPressed,
+              child: Text(buttonText),
             ),
           ],
-        ),
+        ],
       ),
     );
   }
