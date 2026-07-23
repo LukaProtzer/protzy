@@ -4,7 +4,7 @@ import '../home/home_screen.dart';
 import '../household/household_screen.dart';
 import '../inventory/inventory_screen.dart';
 import '../settings/settings_screen.dart';
-import '../shopping/shopping_lists_screen.dart';
+import '../shopping/shopping_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -18,7 +18,7 @@ class _MainScreenState extends State<MainScreen> {
 
   final List<Widget> _pages = const [
     HomeScreen(),
-    ShoppingListsScreen(),
+    ShoppingScreen(),
     InventoryScreen(),
     HouseholdScreen(),
     SettingsScreen(),
