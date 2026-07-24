@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../household/household_service.dart';
 import '../household/household_task.dart';
@@ -27,7 +28,8 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
   final PlannerService _plannerService = PlannerService();
   final HouseholdService _householdService =
   HouseholdService();
@@ -39,6 +41,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, int> _memberColors = {};
 
   bool _isLoading = true;
+  bool _showCelebration = false;
+  bool _celebrationCheckRunning = false;
+
+  late final AnimationController _celebrationController;
 
   static const _defaultMemberColors = {
     'luka': 0xFF4F7DF3,
@@ -48,7 +54,19 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+
+    _celebrationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    );
+
     _loadDashboard();
+  }
+
+  @override
+  void dispose() {
+    _celebrationController.dispose();
+    super.dispose();
   }
 
   @override
@@ -85,6 +103,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _shoppingLists = results[3] as List<ShoppingList>;
       _isLoading = false;
     });
+
+    await _maybeShowCelebration();
   }
 
   bool _sameDay(DateTime a, DateTime b) {
@@ -307,38 +327,153 @@ class _HomeScreenState extends State<HomeScreen> {
         _dueRoutines.length;
   }
 
+
+  bool get _completedSomethingToday {
+    final now = DateTime.now();
+
+    return _tasks.any((task) {
+      return task.completedAt != null &&
+          _sameDay(task.completedAt!, now);
+    });
+  }
+
+  Future<void> _maybeShowCelebration() async {
+    if (_celebrationCheckRunning ||
+        !mounted ||
+        _todayTotalCount != 0 ||
+        !_completedSomethingToday) {
+      return;
+    }
+
+    _celebrationCheckRunning = true;
+
+    final now = DateTime.now();
+    final dateKey =
+        '${now.year}-${now.month.toString().padLeft(2, '0')}-'
+        '${now.day.toString().padLeft(2, '0')}';
+    final storageKey = 'home_celebration_$dateKey';
+    final preferences =
+    await SharedPreferences.getInstance();
+    final alreadyShown =
+        preferences.getBool(storageKey) ?? false;
+
+    if (!mounted) {
+      _celebrationCheckRunning = false;
+      return;
+    }
+
+    if (!alreadyShown) {
+      await preferences.setBool(storageKey, true);
+
+      setState(() {
+        _showCelebration = true;
+      });
+
+      _celebrationController
+        ..reset()
+        ..forward();
+
+      await Future<void>.delayed(
+        const Duration(milliseconds: 1700),
+      );
+
+      if (mounted) {
+        setState(() {
+          _showCelebration = false;
+        });
+      }
+    }
+
+    _celebrationCheckRunning = false;
+  }
+
+  int _routineStreak(HouseholdTask task) {
+    if (task.recurrence ==
+        HouseholdTaskRecurrence.none ||
+        task.history.isEmpty) {
+      return 0;
+    }
+
+    final entries = [...task.history]
+      ..sort(
+            (a, b) =>
+            b.scheduledFor.compareTo(a.scheduledFor),
+      );
+
+    var streak = 0;
+
+    for (final entry in entries) {
+      if (entry.status ==
+          HouseholdRoutineStatus.completed) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+
+    return streak;
+  }
+
+  String _seasonEmoji(DateTime now) {
+    if (now.month == 12 || now.month <= 2) {
+      return '❄️';
+    }
+
+    if (now.month >= 3 && now.month <= 5) {
+      return '🌱';
+    }
+
+    if (now.month >= 6 && now.month <= 8) {
+      return '🌿';
+    }
+
+    return '🍂';
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: _isLoading
-          ? const Center(
-        child: CircularProgressIndicator(),
-      )
-          : RefreshIndicator(
-        onRefresh: _loadDashboard,
-        child: ListView(
-          physics:
-          const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(
-            16,
-            18,
-            16,
-            36,
+      child: Stack(
+        children: [
+          _isLoading
+              ? const Center(
+            child: CircularProgressIndicator(),
+          )
+              : RefreshIndicator(
+            onRefresh: _loadDashboard,
+            child: ListView(
+              physics:
+              const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(
+                16,
+                18,
+                16,
+                36,
+              ),
+              children: [
+                _buildGreeting(),
+                const SizedBox(height: 18),
+                _buildOverviewCard(),
+                const SizedBox(height: 18),
+                _buildQuickActions(),
+                const SizedBox(height: 24),
+                _buildPlannerSection(),
+                const SizedBox(height: 24),
+                _buildHouseholdSection(),
+                const SizedBox(height: 24),
+                _buildShoppingSection(),
+              ],
+            ),
           ),
-          children: [
-            _buildGreeting(),
-            const SizedBox(height: 18),
-            _buildOverviewCard(),
-            const SizedBox(height: 18),
-            _buildQuickActions(),
-            const SizedBox(height: 24),
-            _buildPlannerSection(),
-            const SizedBox(height: 24),
-            _buildHouseholdSection(),
-            const SizedBox(height: 24),
-            _buildShoppingSection(),
-          ],
-        ),
+          if (_showCelebration)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: _CelebrationOverlay(
+                  animation: _celebrationController,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -421,7 +556,8 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 4),
               Text(
                 '${weekdays[now.weekday - 1]}, '
-                    '${now.day}. ${months[now.month - 1]}',
+                    '${now.day}. ${months[now.month - 1]} '
+                    '${_seasonEmoji(now)}',
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: colors.onSurfaceVariant,
                 ),
@@ -791,6 +927,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final colors = theme.colorScheme;
     final isRoutine = task.recurrence !=
         HouseholdTaskRecurrence.none;
+    final streak = _routineStreak(task);
 
     final assigneeText = task.assigneeIds.isEmpty
         ? 'Nicht zugewiesen'
@@ -858,6 +995,27 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
+                if (isRoutine && streak >= 2) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colors.secondaryContainer,
+                      borderRadius:
+                      BorderRadius.circular(18),
+                    ),
+                    child: Text(
+                      '🔥 $streak',
+                      style: TextStyle(
+                        color: colors.onSecondaryContainer,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                ],
                 if (task.priority ==
                     HouseholdTaskPriority.high)
                   Icon(
@@ -1132,6 +1290,132 @@ class _QuickAction extends StatelessWidget {
   }
 }
 
+
+
+class _CelebrationOverlay extends StatelessWidget {
+  const _CelebrationOverlay({
+    required this.animation,
+  });
+
+  final Animation<double> animation;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, child) {
+        final value = Curves.easeOut.transform(
+          animation.value,
+        );
+        final fade = 1 -
+            Curves.easeIn.transform(
+              (animation.value - 0.65)
+                  .clamp(0.0, 1.0),
+            );
+
+        return Opacity(
+          opacity: fade,
+          child: Stack(
+            children: [
+              Positioned(
+                top: 95 - (value * 35),
+                left: 24 + (value * 18),
+                child: _sparkle(
+                  '✨',
+                  30,
+                  value,
+                ),
+              ),
+              Positioned(
+                top: 135 - (value * 55),
+                right: 28 + (value * 12),
+                child: _sparkle(
+                  '⭐',
+                  25,
+                  value,
+                ),
+              ),
+              Positioned(
+                top: 225 - (value * 70),
+                left: 82,
+                child: _sparkle(
+                  '✦',
+                  24,
+                  value,
+                ),
+              ),
+              Positioned(
+                top: 260 - (value * 45),
+                right: 80,
+                child: _sparkle(
+                  '✨',
+                  22,
+                  value,
+                ),
+              ),
+              Align(
+                alignment: const Alignment(0, -0.3),
+                child: Transform.scale(
+                  scale: 0.85 + (value * 0.15),
+                  child: Opacity(
+                    opacity: animation.value < 0.12
+                        ? animation.value / 0.12
+                        : fade,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 13,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colors.primaryContainer,
+                        borderRadius:
+                        BorderRadius.circular(24),
+                        boxShadow: [
+                          BoxShadow(
+                            blurRadius: 22,
+                            color: colors.shadow.withValues(
+                              alpha: 0.18,
+                            ),
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        '✨ Alles geschafft – stark! ✨',
+                        style: TextStyle(
+                          color: colors.onPrimaryContainer,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _sparkle(
+      String symbol,
+      double size,
+      double value,
+      ) {
+    return Transform.rotate(
+      angle: value * 1.4,
+      child: Transform.scale(
+        scale: 0.6 + (value * 0.6),
+        child: Text(
+          symbol,
+          style: TextStyle(fontSize: size),
+        ),
+      ),
+    );
+  }
+}
 
 class _HomeMood {
   const _HomeMood({

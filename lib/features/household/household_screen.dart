@@ -1160,6 +1160,17 @@ class _HouseholdScreenState
                           Icons.error_outline,
                         ),
                       ),
+                      if (_routineStreak(task) >= 2) ...[
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: _historyStat(
+                            sheetContext,
+                            _routineStreak(task),
+                            'Streak',
+                            Icons.local_fire_department,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -1310,6 +1321,33 @@ class _HouseholdScreenState
     );
   }
 
+  int _routineStreak(HouseholdTask task) {
+    if (task.recurrence ==
+        HouseholdTaskRecurrence.none ||
+        task.history.isEmpty) {
+      return 0;
+    }
+
+    final entries = [...task.history]
+      ..sort(
+            (a, b) =>
+            b.scheduledFor.compareTo(a.scheduledFor),
+      );
+
+    var streak = 0;
+
+    for (final entry in entries) {
+      if (entry.status ==
+          HouseholdRoutineStatus.completed) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+
+    return streak;
+  }
+
   Widget _buildTaskCard(
       HouseholdTask task, {
         VoidCallback? onOpenDetails,
@@ -1329,6 +1367,7 @@ class _HouseholdScreenState
 
     final isRoutine = task.recurrence !=
         HouseholdTaskRecurrence.none;
+    final streak = _routineStreak(task);
 
     final completedToday = isRoutine &&
         task.completedAt != null &&
@@ -1468,6 +1507,27 @@ class _HouseholdScreenState
                     ],
                   ),
                 ),
+                if (isRoutine && streak >= 2) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colors.secondaryContainer,
+                      borderRadius:
+                      BorderRadius.circular(18),
+                    ),
+                    child: Text(
+                      '🔥 $streak',
+                      style: TextStyle(
+                        color: colors.onSecondaryContainer,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 2),
+                ],
                 PopupMenuButton<_TaskAction>(
                   tooltip: 'Optionen',
                   onSelected: (action) {
