@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "753196874953",
+    "project_id": "protzy-app",
+    "storage_bucket": "protzy-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:753196874953:android:5cb6179429bdf5f564e118",
+        "android_client_info": {
+          "package_name": "com.example.protzy"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBM847tTtMmckZsHQin-N6oBlX51AG-W4w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:753196874953:android:73e7708430db5d8a64e118",
+        "android_client_info": {
+          "package_name": "com.protzy.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBM847tTtMmckZsHQin-N6oBlX51AG-W4w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
