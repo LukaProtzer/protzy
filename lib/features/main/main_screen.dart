@@ -18,6 +18,9 @@ class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   int _homeRefreshToken = 0;
   int _shoppingRefreshToken = 0;
+  int _shoppingAddItemToken = 0;
+  int _plannerAddEventToken = 0;
+  int _householdAddTaskToken = 0;
 
   void _selectPage(int index) {
     setState(() {
@@ -33,18 +36,50 @@ class _MainScreenState extends State<MainScreen> {
     });
   }
 
+  void _openShoppingItemCreator() {
+    setState(() {
+      _currentIndex = 1;
+      _shoppingAddItemToken++;
+    });
+  }
+
+  void _openPlannerEventCreator() {
+    setState(() {
+      _currentIndex = 2;
+      _plannerAddEventToken++;
+    });
+  }
+
+  void _openHouseholdTaskCreator() {
+    setState(() {
+      _currentIndex = 3;
+      _householdAddTaskToken++;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = <Widget>[
       HomeScreen(
         refreshToken: _homeRefreshToken,
         onNavigate: _selectPage,
+        onAddShoppingItem:
+        _openShoppingItemCreator,
+        onAddPlannerEvent:
+        _openPlannerEventCreator,
+        onAddHouseholdTask:
+        _openHouseholdTaskCreator,
       ),
       ShoppingScreen(
         refreshToken: _shoppingRefreshToken,
+        addItemToken: _shoppingAddItemToken,
       ),
-      const PlannerScreen(),
-      const HouseholdScreen(),
+      PlannerScreen(
+        addEventToken: _plannerAddEventToken,
+      ),
+      HouseholdScreen(
+        addTaskToken: _householdAddTaskToken,
+      ),
       const SettingsScreen(),
     ];
 

@@ -17,9 +17,11 @@ class ShoppingScreen extends StatefulWidget {
   const ShoppingScreen({
     super.key,
     this.refreshToken = 0,
+    this.addItemToken = 0,
   });
 
   final int refreshToken;
+  final int addItemToken;
 
   @override
   State<ShoppingScreen> createState() => _ShoppingScreenState();
@@ -97,11 +99,36 @@ class _ShoppingScreenState extends State<ShoppingScreen> {
   void didUpdateWidget(covariant ShoppingScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    if (oldWidget.refreshToken != widget.refreshToken) {
-      _loadLists(
+    final shouldRefresh =
+        oldWidget.refreshToken != widget.refreshToken;
+    final shouldAddItem =
+        oldWidget.addItemToken != widget.addItemToken;
+
+    if (shouldRefresh || shouldAddItem) {
+      _handleExternalRequest(
+        refresh: shouldRefresh,
+        addItem: shouldAddItem,
+      );
+    }
+  }
+
+  Future<void> _handleExternalRequest({
+    required bool refresh,
+    required bool addItem,
+  }) async {
+    if (refresh || addItem) {
+      await _loadLists(
         preferredTargetListId: _selectedTargetListId,
       );
     }
+
+    if (!mounted || !addItem) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _showNewItemDialog();
+      }
+    });
   }
 
   @override

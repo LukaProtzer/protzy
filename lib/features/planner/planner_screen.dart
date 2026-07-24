@@ -5,7 +5,12 @@ import 'planner_event.dart';
 import 'planner_service.dart';
 
 class PlannerScreen extends StatefulWidget {
-  const PlannerScreen({super.key});
+  const PlannerScreen({
+    super.key,
+    this.addEventToken = 0,
+  });
+
+  final int addEventToken;
 
   @override
   State<PlannerScreen> createState() => _PlannerScreenState();
@@ -37,6 +42,22 @@ class _PlannerScreenState extends State<PlannerScreen> {
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didUpdateWidget(
+      covariant PlannerScreen oldWidget,
+      ) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.addEventToken !=
+        widget.addEventToken) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _addOrEdit();
+        }
+      });
+    }
   }
 
   Future<void> _load() async {

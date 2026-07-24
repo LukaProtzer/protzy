@@ -11,10 +11,16 @@ class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     required this.onNavigate,
+    required this.onAddShoppingItem,
+    required this.onAddPlannerEvent,
+    required this.onAddHouseholdTask,
     this.refreshToken = 0,
   });
 
   final ValueChanged<int> onNavigate;
+  final VoidCallback onAddShoppingItem;
+  final VoidCallback onAddPlannerEvent;
+  final VoidCallback onAddHouseholdTask;
   final int refreshToken;
 
   @override
@@ -94,13 +100,58 @@ class _HomeScreenState extends State<HomeScreen> {
     return first.isBefore(second);
   }
 
-  String _greeting() {
-    final hour = DateTime.now().hour;
+  _HomeMood _homeMood() {
+    final now = DateTime.now();
+    final hour = now.hour;
+    final hasNothingDue = _todayTotalCount == 0;
+    final rareSparkle =
+        (now.year + now.month + now.day) % 9 == 0;
 
-    if (hour < 11) return 'Guten Morgen';
-    if (hour < 17) return 'Guten Tag';
+    if (hour >= 5 && hour < 11) {
+      return _HomeMood(
+        greeting: 'Guten Morgen',
+        emoji: '☕',
+        message: hasNothingDue
+            ? 'Ruhiger Start – heute ist alles im grünen Bereich.'
+            : 'Kaffee an, Tag an.',
+      );
+    }
 
-    return 'Guten Abend';
+    if (hour >= 11 && hour < 14) {
+      return _HomeMood(
+        greeting: 'Guten Mittag',
+        emoji: '☀️',
+        message: now.weekday == DateTime.friday
+            ? 'Freitagsmodus: nur noch der Endspurt.'
+            : 'Halbzeit – ihr habt den Tag im Griff.',
+      );
+    }
+
+    if (hour >= 14 && hour < 18) {
+      return _HomeMood(
+        greeting: 'Guten Nachmittag',
+        emoji: rareSparkle ? '✨' : '🌤️',
+        message: rareSparkle
+            ? 'Kleine Sternschnuppe am Nachmittag erwischt.'
+            : 'Noch ein paar Dinge, dann ist Feierabend.',
+      );
+    }
+
+    if (hour >= 18 && hour < 23) {
+      return _HomeMood(
+        greeting: 'Guten Abend',
+        emoji: '🌙',
+        message: hasNothingDue
+            ? 'Alles erledigt – Füße hoch.'
+            : 'Der Abend ist da, Protzy hält den Rest im Blick.',
+      );
+    }
+
+    return _HomeMood(
+      greeting: 'Gute Nacht',
+      emoji: '🦉',
+      message: 'Die Eule hat alles im Blick.',
+    );
   }
 
   String _formatTime(DateTime date) {
@@ -296,6 +347,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final now = DateTime.now();
+    final mood = _homeMood();
 
     const weekdays = [
       'Montag',
@@ -323,18 +375,48 @@ class _HomeScreenState extends State<HomeScreen> {
     ];
 
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
           child: Column(
             crossAxisAlignment:
             CrossAxisAlignment.start,
             children: [
-              Text(
-                '${_greeting()} 👋',
-                style: theme.textTheme.headlineMedium
-                    ?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
+              Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      mood.greeting,
+                      style: theme.textTheme.headlineMedium
+                          ?.copyWith(
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  TweenAnimationBuilder<double>(
+                    tween: Tween(
+                      begin: 0.72,
+                      end: 1,
+                    ),
+                    duration:
+                    const Duration(milliseconds: 850),
+                    curve: Curves.elasticOut,
+                    builder: (context, value, child) {
+                      return Transform.scale(
+                        scale: value,
+                        child: Transform.rotate(
+                          angle: (1 - value) * -0.12,
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: Text(
+                      mood.emoji,
+                      style: const TextStyle(fontSize: 31),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 4),
               Text(
@@ -344,9 +426,28 @@ class _HomeScreenState extends State<HomeScreen> {
                   color: colors.onSurfaceVariant,
                 ),
               ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: colors.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Text(
+                  mood.message,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: colors.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
             ],
           ),
         ),
+        const SizedBox(width: 10),
         IconButton.filledTonal(
           onPressed: () {
             _loadDashboard(showLoading: false);
@@ -512,7 +613,7 @@ class _HomeScreenState extends State<HomeScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _sectionTitle(
-          'Schnellzugriffe',
+          'Direkt hinzufügen',
           icon: Icons.bolt_outlined,
         ),
         const SizedBox(height: 10),
@@ -520,25 +621,28 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             Expanded(
               child: _QuickAction(
-                icon: Icons.shopping_cart_outlined,
-                label: 'Einkauf',
-                onTap: () => widget.onNavigate(1),
+                icon: Icons.add_shopping_cart,
+                label: 'Artikel',
+                subtitle: 'Einkauf',
+                onTap: widget.onAddShoppingItem,
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: _QuickAction(
-                icon: Icons.calendar_month_outlined,
-                label: 'Planer',
-                onTap: () => widget.onNavigate(2),
+                icon: Icons.event_available_outlined,
+                label: 'Termin',
+                subtitle: 'Planer',
+                onTap: widget.onAddPlannerEvent,
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
               child: _QuickAction(
-                icon: Icons.home_work_outlined,
-                label: 'Haushalt',
-                onTap: () => widget.onNavigate(3),
+                icon: Icons.add_task,
+                label: 'Aufgabe',
+                subtitle: 'Haushalt',
+                onTap: widget.onAddHouseholdTask,
               ),
             ),
           ],
@@ -963,11 +1067,13 @@ class _QuickAction extends StatelessWidget {
   const _QuickAction({
     required this.icon,
     required this.label,
+    required this.subtitle,
     required this.onTap,
   });
 
   final IconData icon;
   final String label;
+  final String subtitle;
   final VoidCallback onTap;
 
   @override
@@ -1006,7 +1112,16 @@ class _QuickAction extends StatelessWidget {
                 maxLines: 1,
                 textAlign: TextAlign.center,
                 style: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                maxLines: 1,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
                 ),
               ),
             ],
@@ -1015,4 +1130,17 @@ class _QuickAction extends StatelessWidget {
       ),
     );
   }
+}
+
+
+class _HomeMood {
+  const _HomeMood({
+    required this.greeting,
+    required this.emoji,
+    required this.message,
+  });
+
+  final String greeting;
+  final String emoji;
+  final String message;
 }

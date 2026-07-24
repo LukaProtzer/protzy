@@ -6,7 +6,12 @@ import 'household_service.dart';
 import 'household_task.dart';
 
 class HouseholdScreen extends StatefulWidget {
-  const HouseholdScreen({super.key});
+  const HouseholdScreen({
+    super.key,
+    this.addTaskToken = 0,
+  });
+
+  final int addTaskToken;
 
   @override
   State<HouseholdScreen> createState() =>
@@ -40,6 +45,22 @@ class _HouseholdScreenState
   void initState() {
     super.initState();
     _loadTasks();
+  }
+
+  @override
+  void didUpdateWidget(
+      covariant HouseholdScreen oldWidget,
+      ) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.addTaskToken !=
+        widget.addTaskToken) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _showTaskSheet();
+        }
+      });
+    }
   }
 
   Future<void> _loadTasks() async {
