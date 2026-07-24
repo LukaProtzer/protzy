@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 
 import 'default_product_suggestions.dart';
 import 'shopping_history_entry.dart';
-import 'shopping_item.dart';
-import 'shopping_list.dart';
 import 'shopping_service.dart';
 
 class ShoppingHistoryScreen extends StatefulWidget {
@@ -21,7 +19,6 @@ class _ShoppingHistoryScreenState
   final ShoppingService _service = ShoppingService();
 
   List<ShoppingHistoryEntry> _history = [];
-
   bool _isLoading = true;
   bool _isSaving = false;
 
@@ -46,8 +43,15 @@ class _ShoppingHistoryScreenState
     });
   }
 
+  String _generateId() {
+    final random = math.Random();
+
+    return '${DateTime.now().millisecondsSinceEpoch}'
+        '${random.nextInt(999999)}';
+  }
+
   String _formatDate(DateTime date) {
-    final localDate = date.toLocal();
+    final local = date.toLocal();
 
     const weekdays = [
       'Montag',
@@ -74,16 +78,15 @@ class _ShoppingHistoryScreenState
       'Dezember',
     ];
 
-    final weekday = weekdays[localDate.weekday - 1];
-    final month = months[localDate.month - 1];
-
-    return '$weekday, ${localDate.day}. $month ${localDate.year}';
+    return '${weekdays[local.weekday - 1]}, '
+        '${local.day}. ${months[local.month - 1]} '
+        '${local.year}';
   }
 
   String _formatTime(DateTime date) {
-    final localDate = date.toLocal();
-    final hour = localDate.hour.toString().padLeft(2, '0');
-    final minute = localDate.minute.toString().padLeft(2, '0');
+    final local = date.toLocal();
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
 
     return '$hour:$minute Uhr';
   }
@@ -112,13 +115,6 @@ class _ShoppingHistoryScreenState
     return '🛒';
   }
 
-  String _generateId() {
-    final random = math.Random();
-
-    return '${DateTime.now().millisecondsSinceEpoch}'
-        '${random.nextInt(999999)}';
-  }
-
   Future<void> _deleteEntry(
       ShoppingHistoryEntry entry,
       ) async {
@@ -129,7 +125,7 @@ class _ShoppingHistoryScreenState
           title: const Text('Einkauf löschen?'),
           content: Text(
             'Der Einkauf vom ${_formatDate(entry.completedAt)} '
-                'wird dauerhaft aus der Historie entfernt.',
+                'wird dauerhaft entfernt.',
           ),
           actions: [
             TextButton(
@@ -212,33 +208,39 @@ class _ShoppingHistoryScreenState
     if (!mounted) return;
 
     if (lists.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Erstelle zuerst eine Einkaufsliste.',
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Erstelle zuerst eine Einkaufsliste.',
+            ),
+            duration: Duration(seconds: 2),
           ),
-          duration: Duration(seconds: 2),
-        ),
-      );
+        );
       return;
     }
 
     String selectedListId = lists.first.id;
 
-    final result = await showModalBottomSheet<_HistoryRestoreResult>(
+    final result =
+    await showModalBottomSheet<_HistoryRestoreResult>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
+            final theme = Theme.of(context);
+            final colorScheme = theme.colorScheme;
+
             return SafeArea(
               top: false,
               child: Container(
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.surface,
+                  color: colorScheme.surface,
                   borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(28),
+                    top: Radius.circular(32),
                   ),
                 ),
                 padding: const EdgeInsets.fromLTRB(
@@ -251,24 +253,57 @@ class _ShoppingHistoryScreenState
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Container(
-                      width: 44,
-                      height: 4,
+                      width: 46,
+                      height: 5,
                       decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .outline,
-                        borderRadius: BorderRadius.circular(10),
+                        color: colorScheme.outlineVariant,
+                        borderRadius: BorderRadius.circular(20),
                       ),
                     ),
                     const SizedBox(height: 20),
                     Row(
                       children: [
+                        Container(
+                          width: 48,
+                          height: 48,
+                          decoration: BoxDecoration(
+                            color:
+                            colorScheme.primaryContainer,
+                            borderRadius:
+                            BorderRadius.circular(17),
+                          ),
+                          child: const Icon(
+                            Icons.playlist_add,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
                         Expanded(
-                          child: Text(
-                            'Einkauf erneut hinzufügen',
-                            style: Theme.of(context)
-                                .textTheme
-                                .headlineSmall,
+                          child: Column(
+                            crossAxisAlignment:
+                            CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Einkauf erneut hinzufügen',
+                                style: theme
+                                    .textTheme
+                                    .titleLarge
+                                    ?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                '${entry.itemCount} Artikel '
+                                    'werden wieder geöffnet.',
+                                style: theme
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(
+                                  color: colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         IconButton(
@@ -279,38 +314,44 @@ class _ShoppingHistoryScreenState
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '${entry.itemCount} Artikel werden als offene '
-                          'Artikel zu einer Einkaufsliste hinzugefügt.',
-                    ),
                     const SizedBox(height: 20),
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedListId,
-                      isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Einkaufsliste',
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: colorScheme
+                            .surfaceContainerHighest,
+                        borderRadius:
+                        BorderRadius.circular(22),
                       ),
-                      items: lists.map((list) {
-                        return DropdownMenuItem(
-                          value: list.id,
-                          child: Text(
-                            list.name,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        if (value == null) return;
+                      child: DropdownButtonFormField<String>(
+                        initialValue: selectedListId,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: 'Einkaufsliste',
+                          border: InputBorder.none,
+                        ),
+                        items: lists.map((list) {
+                          return DropdownMenuItem(
+                            value: list.id,
+                            child: Text(
+                              list.name,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          if (value == null) return;
 
-                        setSheetState(() {
-                          selectedListId = value;
-                        });
-                      },
+                          setSheetState(() {
+                            selectedListId = value;
+                          });
+                        },
+                      ),
                     ),
-                    const SizedBox(height: 20),
+                    const SizedBox(height: 18),
                     SizedBox(
                       width: double.infinity,
+                      height: 54,
                       child: FilledButton.icon(
                         onPressed: () {
                           Navigator.of(sheetContext).pop(
@@ -391,112 +432,134 @@ class _ShoppingHistoryScreenState
       backgroundColor: Colors.transparent,
       builder: (sheetContext) {
         final mediaQuery = MediaQuery.of(sheetContext);
+        final theme = Theme.of(sheetContext);
+        final colorScheme = theme.colorScheme;
 
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: mediaQuery.viewInsets.bottom,
-          ),
-          child: SafeArea(
-            top: false,
-            child: Container(
-              constraints: BoxConstraints(
-                maxHeight: mediaQuery.size.height * 0.88,
+        return SafeArea(
+          top: false,
+          child: Container(
+            constraints: BoxConstraints(
+              maxHeight: mediaQuery.size.height * 0.9,
+            ),
+            decoration: BoxDecoration(
+              color: colorScheme.surface,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(32),
               ),
-              decoration: BoxDecoration(
-                color: Theme.of(sheetContext)
-                    .colorScheme
-                    .surface,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(28),
-                ),
-              ),
-              child: Column(
-                children: [
-                  const SizedBox(height: 12),
-                  Container(
-                    width: 44,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Theme.of(sheetContext)
-                          .colorScheme
-                          .outline,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
+            ),
+            child: Column(
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 46,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: colorScheme.outlineVariant,
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                  Padding(
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    20,
+                    20,
+                    12,
+                    14,
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 50,
+                        height: 50,
+                        decoration: BoxDecoration(
+                          color:
+                          colorScheme.primaryContainer,
+                          borderRadius:
+                          BorderRadius.circular(18),
+                        ),
+                        child: const Icon(
+                          Icons.receipt_long_outlined,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment:
+                          CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _formatDate(entry.completedAt),
+                              style: theme.textTheme.titleLarge
+                                  ?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              '${_formatTime(entry.completedAt)} '
+                                  '• ${entry.itemCount} Artikel',
+                              style: theme.textTheme.bodyMedium
+                                  ?.copyWith(
+                                color: colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () {
+                          Navigator.of(sheetContext).pop();
+                        },
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: ListView(
                     padding: const EdgeInsets.fromLTRB(
                       20,
+                      0,
                       20,
-                      12,
-                      12,
+                      20,
                     ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment:
-                            CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _formatDate(entry.completedAt),
-                                style: Theme.of(sheetContext)
-                                    .textTheme
-                                    .headlineSmall,
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _formatTime(entry.completedAt),
-                              ),
-                            ],
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () {
-                            Navigator.of(sheetContext).pop();
-                          },
-                          icon: const Icon(Icons.close),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    child: ListView(
-                      padding: const EdgeInsets.fromLTRB(
-                        20,
-                        0,
-                        20,
-                        24,
+                    children: [
+                      _buildSummaryCard(
+                        sheetContext,
+                        entry,
                       ),
-                      children: [
-                        _buildSummaryCard(
-                          entry,
-                        ),
-                        const SizedBox(height: 16),
-                        ..._buildGroupedHistoryItems(
-                          sheetContext,
-                          entry.items,
-                        ),
-                        const SizedBox(height: 20),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: () {
-                              Navigator.of(sheetContext).pop();
-                              _addEntryToList(entry);
-                            },
-                            icon: const Icon(
-                              Icons.playlist_add,
-                            ),
-                            label: const Text(
-                              'Einkauf erneut hinzufügen',
-                            ),
-                          ),
-                        ),
-                      ],
+                      const SizedBox(height: 16),
+                      ..._buildGroupedHistoryItems(
+                        sheetContext,
+                        entry.items,
+                      ),
+                    ],
+                  ),
+                ),
+                SafeArea(
+                  top: false,
+                  minimum: const EdgeInsets.fromLTRB(
+                    20,
+                    10,
+                    20,
+                    16,
+                  ),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 54,
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        Navigator.of(sheetContext).pop();
+                        _addEntryToList(entry);
+                      },
+                      icon: const Icon(Icons.playlist_add),
+                      label: const Text(
+                        'Einkauf erneut hinzufügen',
+                      ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         );
@@ -505,42 +568,69 @@ class _ShoppingHistoryScreenState
   }
 
   Widget _buildSummaryCard(
+      BuildContext context,
       ShoppingHistoryEntry entry,
       ) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.receipt_long_outlined),
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _buildSummaryStat(
+                  context,
+                  icon: Icons.shopping_basket_outlined,
+                  value: '${entry.itemCount}',
+                  label: 'Artikel',
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _buildSummaryStat(
+                  context,
+                  icon: Icons.list_alt,
+                  value:
+                  '${entry.sourceListNames.length}',
+                  label: 'Listen',
+                ),
+              ),
+              if (entry.hasTotalAmount) ...[
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    '${entry.itemCount} Artikel',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
+                  child: _buildSummaryStat(
+                    context,
+                    icon: Icons.euro,
+                    value: _formatCurrency(
+                      entry.totalAmount!,
                     ),
+                    label: 'Gesamt',
                   ),
                 ),
-                if (entry.hasTotalAmount)
-                  Text(
-                    _formatCurrency(entry.totalAmount!),
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
               ],
-            ),
-            if (entry.sourceListNames.isNotEmpty) ...[
-              const Divider(height: 24),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            ],
+          ),
+          if (entry.sourceListNames.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Row(
                 children: [
                   const Icon(
                     Icons.list_alt,
-                    size: 20,
+                    size: 19,
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -550,14 +640,22 @@ class _ShoppingHistoryScreenState
                   ),
                 ],
               ),
-            ],
-            if (entry.storeName != null) ...[
-              const Divider(height: 24),
-              Row(
+            ),
+          ],
+          if (entry.storeName != null) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: BorderRadius.circular(18),
+              ),
+              child: Row(
                 children: [
                   const Icon(
                     Icons.store_outlined,
-                    size: 20,
+                    size: 19,
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -565,25 +663,54 @@ class _ShoppingHistoryScreenState
                   ),
                 ],
               ),
-            ],
-            if (entry.note.trim().isNotEmpty) ...[
-              const Divider(height: 24),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(
-                    Icons.notes,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(entry.note),
-                  ),
-                ],
-              ),
-            ],
+            ),
           ],
-        ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummaryStat(
+      BuildContext context, {
+        required IconData icon,
+        required String value,
+        required String label,
+      }) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 12,
+      ),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            icon,
+            size: 20,
+            color: colorScheme.primary,
+          ),
+          const SizedBox(height: 5),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          Text(
+            label,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -600,6 +727,7 @@ class _ShoppingHistoryScreenState
         item.category,
             () => [],
       );
+
       groupedItems[item.category]!.add(item);
     }
 
@@ -608,198 +736,386 @@ class _ShoppingHistoryScreenState
     return categories.expand((category) {
       final categoryItems = groupedItems[category]!
         ..sort(
-              (a, b) => a.name.toLowerCase().compareTo(
-            b.name.toLowerCase(),
-          ),
+              (a, b) => a.name
+              .toLowerCase()
+              .compareTo(b.name.toLowerCase()),
         );
 
       return [
         Padding(
           padding: const EdgeInsets.only(
             top: 10,
-            bottom: 6,
+            bottom: 7,
           ),
           child: Text(
             category,
-            style: Theme.of(context).textTheme.titleMedium,
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: Theme.of(context)
+                  .colorScheme
+                  .onSurfaceVariant,
+            ),
           ),
         ),
         ...categoryItems.map(
-              (item) => Card(
-            margin: const EdgeInsets.symmetric(vertical: 4),
-            child: ListTile(
-              leading: Text(
-                _emojiForItem(item),
-                style: const TextStyle(fontSize: 24),
-              ),
-              title: Text(item.name),
-              subtitle: Text(
-                '${_formatQuantity(item.quantity)} ${item.unit}'
-                    '${item.note.trim().isEmpty ? '' : ' • ${item.note}'}'
-                    '${item.sourceListName.trim().isEmpty ? '' : '\nListe: ${item.sourceListName}'}',
-              ),
-              isThreeLine:
-              item.sourceListName.trim().isNotEmpty,
-              trailing: item.totalPrice == null
-                  ? null
-                  : Text(
-                _formatCurrency(item.totalPrice!),
-              ),
-            ),
+              (item) => _buildHistoryItemCard(
+            context,
+            item,
           ),
         ),
       ];
     }).toList();
   }
 
-  Widget _buildHistoryCard(
-      ShoppingHistoryEntry entry,
+  Widget _buildHistoryItemCard(
+      BuildContext context,
+      ShoppingHistoryItem item,
       ) {
-    final sourceNames = entry.sourceListNames.isEmpty
-        ? 'Keine Listenangabe'
-        : entry.sourceListNames.join(', ');
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final quantity =
+        '${_formatQuantity(item.quantity)} ${item.unit}';
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: () {
-          _showEntryDetails(entry);
-        },
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              Row(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(22),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: colorScheme.surface,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Center(
+                child: Text(
+                  _emojiForItem(item),
+                  style: const TextStyle(fontSize: 25),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment:
+                CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .primaryContainer,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: const Icon(
-                      Icons.shopping_bag_outlined,
+                  Text(
+                    item.name,
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment:
-                      CrossAxisAlignment.start,
+                  const SizedBox(height: 3),
+                  Text(
+                    item.note.trim().isEmpty
+                        ? quantity
+                        : '$quantity • ${item.note}',
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(
+                      color:
+                      colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (item.sourceListName
+                      .trim()
+                      .isNotEmpty) ...[
+                    const SizedBox(height: 5),
+                    Row(
                       children: [
-                        Text(
-                          _formatDate(entry.completedAt),
-                          style: Theme.of(context)
-                              .textTheme
-                              .titleMedium
-                              ?.copyWith(
-                            fontWeight: FontWeight.bold,
+                        const Icon(
+                          Icons.list_alt,
+                          size: 14,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            item.sourceListName,
+                            maxLines: 1,
+                            overflow:
+                            TextOverflow.ellipsis,
+                            style: theme
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                              color: colorScheme
+                                  .onSurfaceVariant,
+                            ),
                           ),
                         ),
-                        const SizedBox(height: 3),
-                        Text(
-                          '${_formatTime(entry.completedAt)} '
-                              '• ${entry.itemCount} Artikel',
-                        ),
                       ],
-                    ),
-                  ),
-                  PopupMenuButton<_HistoryAction>(
-                    onSelected: (action) {
-                      if (action ==
-                          _HistoryAction.restore) {
-                        _addEntryToList(entry);
-                      } else if (action ==
-                          _HistoryAction.delete) {
-                        _deleteEntry(entry);
-                      }
-                    },
-                    itemBuilder: (context) => const [
-                      PopupMenuItem(
-                        value: _HistoryAction.restore,
-                        child: Row(
-                          children: [
-                            Icon(Icons.playlist_add),
-                            SizedBox(width: 12),
-                            Text('Erneut hinzufügen'),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: _HistoryAction.delete,
-                        child: Row(
-                          children: [
-                            Icon(Icons.delete_outline),
-                            SizedBox(width: 12),
-                            Text('Löschen'),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  const Icon(
-                    Icons.list_alt,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      sourceNames,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (entry.hasTotalAmount) ...[
-                    const SizedBox(width: 12),
-                    Text(
-                      _formatCurrency(entry.totalAmount!),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
                     ),
                   ],
                 ],
               ),
-            ],
+            ),
+            if (item.totalPrice != null)
+              Text(
+                _formatCurrency(item.totalPrice!),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHistoryCard(
+      ShoppingHistoryEntry entry,
+      ) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final sourceNames = entry.sourceListNames.isEmpty
+        ? 'Keine Listenangabe'
+        : entry.sourceListNames.join(', ');
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(24),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(24),
+          onTap: () {
+            _showEntryDetails(entry);
+          },
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+              16,
+              16,
+              8,
+              16,
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 54,
+                  height: 54,
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Icon(
+                    Icons.shopping_bag_outlined,
+                    color:
+                    colorScheme.onPrimaryContainer,
+                  ),
+                ),
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _formatDate(entry.completedAt),
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${_formatTime(entry.completedAt)} '
+                            '• ${entry.itemCount} Artikel',
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(
+                          color:
+                          colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 7),
+                      Row(
+                        children: [
+                          const Icon(
+                            Icons.list_alt,
+                            size: 14,
+                          ),
+                          const SizedBox(width: 5),
+                          Expanded(
+                            child: Text(
+                              sourceNames,
+                              maxLines: 1,
+                              overflow:
+                              TextOverflow.ellipsis,
+                              style: theme
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                color: colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                if (entry.hasTotalAmount)
+                  Padding(
+                    padding:
+                    const EdgeInsets.only(right: 4),
+                    child: Text(
+                      _formatCurrency(
+                        entry.totalAmount!,
+                      ),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                PopupMenuButton<_HistoryAction>(
+                  tooltip: 'Optionen',
+                  onSelected: (action) {
+                    if (action ==
+                        _HistoryAction.restore) {
+                      _addEntryToList(entry);
+                    } else {
+                      _deleteEntry(entry);
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: _HistoryAction.restore,
+                      child: Row(
+                        children: [
+                          Icon(Icons.playlist_add),
+                          SizedBox(width: 12),
+                          Text('Erneut hinzufügen'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: _HistoryAction.delete,
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline),
+                          SizedBox(width: 12),
+                          Text('Löschen'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
+  Widget _buildHeaderCard() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final totalItems = _history.fold<int>(
+      0,
+          (sum, entry) => sum + entry.itemCount,
+    );
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(26),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 54,
+            height: 54,
+            decoration: BoxDecoration(
+              color: colorScheme.primaryContainer,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: const Icon(Icons.history_rounded),
+          ),
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${_history.length} Einkäufe',
+                  style: theme.textTheme.titleLarge
+                      ?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  '$totalItems gekaufte Artikel gespeichert',
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(
+                    color:
+                    colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton.filledTonal(
+            onPressed: _loadHistory,
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Neu laden',
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEmptyState() {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(24),
       children: [
         const SizedBox(height: 100),
-        Icon(
-          Icons.history,
-          size: 72,
-          color: Theme.of(context)
-              .colorScheme
-              .outline,
+        Container(
+          width: 76,
+          height: 76,
+          decoration: BoxDecoration(
+            color: colorScheme.primaryContainer,
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.history_rounded,
+            size: 38,
+          ),
         ),
         const SizedBox(height: 20),
         Text(
           'Noch keine Einkäufe',
           textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.headlineSmall,
+          style: theme.textTheme.headlineSmall
+              ?.copyWith(
+            fontWeight: FontWeight.w800,
+          ),
         ),
-        const SizedBox(height: 10),
-        const Text(
+        const SizedBox(height: 8),
+        Text(
           'Abgeschlossene Einkäufe erscheinen hier '
-              'mit allen Artikeln und beteiligten Listen.',
+              'mit allen Artikeln und Listen.',
           textAlign: TextAlign.center,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
         ),
       ],
     );
@@ -825,10 +1141,25 @@ class _ShoppingHistoryScreenState
               ),
             ),
           if (_history.isNotEmpty)
-            IconButton(
-              onPressed: _clearHistory,
-              icon: const Icon(Icons.delete_sweep_outlined),
-              tooltip: 'Historie leeren',
+            PopupMenuButton<_HistoryMenuAction>(
+              onSelected: (action) {
+                if (action ==
+                    _HistoryMenuAction.clear) {
+                  _clearHistory();
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: _HistoryMenuAction.clear,
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete_sweep_outlined),
+                      SizedBox(width: 12),
+                      Text('Historie leeren'),
+                    ],
+                  ),
+                ),
+              ],
             ),
         ],
       ),
@@ -840,21 +1171,22 @@ class _ShoppingHistoryScreenState
         onRefresh: _loadHistory,
         child: _history.isEmpty
             ? _buildEmptyState()
-            : ListView.builder(
+            : ListView(
           physics:
           const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(
             16,
+            8,
             16,
-            16,
-            40,
+            36,
           ),
-          itemCount: _history.length,
-          itemBuilder: (context, index) {
-            return _buildHistoryCard(
-              _history[index],
-            );
-          },
+          children: [
+            _buildHeaderCard(),
+            const SizedBox(height: 18),
+            ..._history.map(
+              _buildHistoryCard,
+            ),
+          ],
         ),
       ),
     );
@@ -872,4 +1204,8 @@ class _HistoryRestoreResult {
 enum _HistoryAction {
   restore,
   delete,
+}
+
+enum _HistoryMenuAction {
+  clear,
 }

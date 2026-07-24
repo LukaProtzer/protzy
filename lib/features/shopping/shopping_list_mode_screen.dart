@@ -6,7 +6,6 @@ import '../../core/constants/shopping_categories.dart';
 import 'default_product_suggestions.dart';
 import 'product_suggestion.dart';
 import 'shopping_item.dart';
-import 'shopping_list.dart';
 import 'shopping_service.dart';
 
 class ShoppingListModeScreen extends StatefulWidget {
