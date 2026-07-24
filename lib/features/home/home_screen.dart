@@ -1,157 +1,1013 @@
 import 'package:flutter/material.dart';
 
-import '../shopping/shopping_lists_screen.dart';
+import '../household/household_service.dart';
+import '../household/household_task.dart';
+import '../planner/planner_event.dart';
+import '../planner/planner_service.dart';
+import '../shopping/shopping_list.dart';
+import '../shopping/shopping_service.dart';
 
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({
+    super.key,
+    required this.onNavigate,
+    this.refreshToken = 0,
+  });
+
+  final ValueChanged<int> onNavigate;
+  final int refreshToken;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final PlannerService _plannerService = PlannerService();
+  final HouseholdService _householdService =
+  HouseholdService();
+  final ShoppingService _shoppingService = ShoppingService();
+
+  List<PlannerEvent> _events = [];
+  List<HouseholdTask> _tasks = [];
+  List<ShoppingList> _shoppingLists = [];
+  Map<String, int> _memberColors = {};
+
+  bool _isLoading = true;
+
+  static const _defaultMemberColors = {
+    'luka': 0xFF4F7DF3,
+    'rebecca': 0xFF9B5DE5,
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDashboard();
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.refreshToken != widget.refreshToken) {
+      _loadDashboard(showLoading: false);
+    }
+  }
+
+  Future<void> _loadDashboard({
+    bool showLoading = true,
+  }) async {
+    if (showLoading && mounted) {
+      setState(() {
+        _isLoading = true;
+      });
+    }
+
+    final results = await Future.wait<dynamic>([
+      _plannerService.loadEvents(),
+      _plannerService.loadMemberColors(),
+      _householdService.loadTasks(),
+      _shoppingService.loadLists(),
+    ]);
+
+    if (!mounted) return;
+
+    setState(() {
+      _events = results[0] as List<PlannerEvent>;
+      _memberColors = results[1] as Map<String, int>;
+      _tasks = results[2] as List<HouseholdTask>;
+      _shoppingLists = results[3] as List<ShoppingList>;
+      _isLoading = false;
+    });
+  }
+
+  bool _sameDay(DateTime a, DateTime b) {
+    return a.year == b.year &&
+        a.month == b.month &&
+        a.day == b.day;
+  }
+
+  bool _isBeforeDay(DateTime a, DateTime b) {
+    final first = DateTime(a.year, a.month, a.day);
+    final second = DateTime(b.year, b.month, b.day);
+
+    return first.isBefore(second);
+  }
+
+  String _greeting() {
+    final hour = DateTime.now().hour;
+
+    if (hour < 11) return 'Guten Morgen';
+    if (hour < 17) return 'Guten Tag';
+
+    return 'Guten Abend';
+  }
+
+  String _formatTime(DateTime date) {
+    final hour = date.hour.toString().padLeft(2, '0');
+    final minute = date.minute.toString().padLeft(2, '0');
+
+    return '$hour:$minute';
+  }
+
+  String _formatShortDate(DateTime date) {
+    const weekdays = [
+      'Mo',
+      'Di',
+      'Mi',
+      'Do',
+      'Fr',
+      'Sa',
+      'So',
+    ];
+
+    return '${weekdays[date.weekday - 1]}, '
+        '${date.day.toString().padLeft(2, '0')}.'
+        '${date.month.toString().padLeft(2, '0')}.';
+  }
+
+  String _assigneeName(String id) {
+    switch (id) {
+      case 'luka':
+        return 'Luka';
+      case 'rebecca':
+        return 'Rebecca';
+      case 'gemeinsam':
+        return 'Gemeinsam';
+      default:
+        return id;
+    }
+  }
+
+  Color _memberColor(String id) {
+    final storedValue = _memberColors[id];
+    final fallbackValue =
+        _defaultMemberColors[id] ?? 0xFF6B7280;
+
+    return Color(storedValue ?? fallbackValue);
+  }
+
+  List<PlannerEvent> get _upcomingEvents {
+    final now = DateTime.now();
+
+    final events = _events.where((event) {
+      return event.visibility !=
+          PlannerVisibility.privateHidden &&
+          event.end.isAfter(now);
+    }).toList()
+      ..sort((a, b) => a.start.compareTo(b.start));
+
+    return events.take(3).toList();
+  }
+
+  List<HouseholdTask> get _todaySingleTasks {
+    final now = DateTime.now();
+
+    final tasks = _tasks.where((task) {
+      return !task.isDone &&
+          task.recurrence ==
+              HouseholdTaskRecurrence.none &&
+          task.dueAt != null &&
+          _sameDay(task.dueAt!, now);
+    }).toList()
+      ..sort((a, b) {
+        final priorityComparison =
+        b.priority.index.compareTo(a.priority.index);
+
+        if (priorityComparison != 0) {
+          return priorityComparison;
+        }
+
+        return a.title
+            .toLowerCase()
+            .compareTo(b.title.toLowerCase());
+      });
+
+    return tasks;
+  }
+
+  List<HouseholdTask> get _dueRoutines {
+    final now = DateTime.now();
+
+    final tasks = _tasks.where((task) {
+      final dueAt = task.dueAt;
+
+      if (task.recurrence ==
+          HouseholdTaskRecurrence.none ||
+          dueAt == null) {
+        return false;
+      }
+
+      final completedToday = task.completedAt != null &&
+          _sameDay(task.completedAt!, now);
+
+      return !completedToday &&
+          (_sameDay(dueAt, now) ||
+              _isBeforeDay(dueAt, now));
+    }).toList()
+      ..sort((a, b) {
+        final aDue = a.dueAt;
+        final bDue = b.dueAt;
+
+        if (aDue == null && bDue == null) return 0;
+        if (aDue == null) return 1;
+        if (bDue == null) return -1;
+
+        return aDue.compareTo(bDue);
+      });
+
+    return tasks;
+  }
+
+  int get _openShoppingItemCount {
+    return _shoppingLists.fold<int>(
+      0,
+          (total, list) =>
+      total +
+          list.items.where((item) => !item.done).length,
+    );
+  }
+
+  List<ShoppingList> get _activeShoppingLists {
+    final lists = _shoppingLists.where((list) {
+      return list.items.any((item) => !item.done);
+    }).toList()
+      ..sort((a, b) {
+        final aCount =
+            a.items.where((item) => !item.done).length;
+        final bCount =
+            b.items.where((item) => !item.done).length;
+
+        return bCount.compareTo(aCount);
+      });
+
+    return lists.take(3).toList();
+  }
+
+  int get _todayTotalCount {
+    final eventCount = _events.where((event) {
+      return event.visibility !=
+          PlannerVisibility.privateHidden &&
+          _sameDay(event.start, DateTime.now());
+    }).length;
+
+    return eventCount +
+        _todaySingleTasks.length +
+        _dueRoutines.length;
+  }
 
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+      child: _isLoading
+          ? const Center(
+        child: CircularProgressIndicator(),
+      )
+          : RefreshIndicator(
+        onRefresh: _loadDashboard,
+        child: ListView(
+          physics:
+          const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(
+            16,
+            18,
+            16,
+            36,
+          ),
           children: [
-            Row(
-              children: [
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Guten Abend 👋',
-                        style: TextStyle(
-                          fontSize: 30,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        'Willkommen zurück bei Protzy',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.white70,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const CircleAvatar(
-                  radius: 24,
-                  child: Icon(Icons.person),
-                ),
-              ],
-            ),
-            const SizedBox(height: 30),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Row(
-                  children: const [
-                    Icon(
-                      Icons.check_circle,
-                      color: Colors.green,
-                      size: 32,
-                    ),
-                    SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Alles in Ordnung\nKeine offenen Aufgaben.',
-                        style: TextStyle(fontSize: 18),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 30),
-            const Text(
-              'Schnellzugriffe',
-              style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 15),
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 3,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              children: [
-                _QuickButton(
-                  icon: Icons.list_alt,
-                  text: 'Einkaufslisten',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const ShoppingListsScreen(),
-                      ),
-                    );
-                  },
-                ),
-                _QuickButton(
-                  icon: Icons.inventory_2,
-                  text: 'Inventar',
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Inventar kommt bald 🚀'),
-                      ),
-                    );
-                  },
-                ),
-                _QuickButton(
-                  icon: Icons.people,
-                  text: 'Haushalt',
-                  onTap: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Haushalt kommt bald 🚀'),
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
+            _buildGreeting(),
+            const SizedBox(height: 18),
+            _buildOverviewCard(),
+            const SizedBox(height: 18),
+            _buildQuickActions(),
+            const SizedBox(height: 24),
+            _buildPlannerSection(),
+            const SizedBox(height: 24),
+            _buildHouseholdSection(),
+            const SizedBox(height: 24),
+            _buildShoppingSection(),
           ],
         ),
       ),
     );
   }
+
+  Widget _buildGreeting() {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final now = DateTime.now();
+
+    const weekdays = [
+      'Montag',
+      'Dienstag',
+      'Mittwoch',
+      'Donnerstag',
+      'Freitag',
+      'Samstag',
+      'Sonntag',
+    ];
+
+    const months = [
+      'Januar',
+      'Februar',
+      'März',
+      'April',
+      'Mai',
+      'Juni',
+      'Juli',
+      'August',
+      'September',
+      'Oktober',
+      'November',
+      'Dezember',
+    ];
+
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment:
+            CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${_greeting()} 👋',
+                style: theme.textTheme.headlineMedium
+                    ?.copyWith(
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${weekdays[now.weekday - 1]}, '
+                    '${now.day}. ${months[now.month - 1]}',
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+        IconButton.filledTonal(
+          onPressed: () {
+            _loadDashboard(showLoading: false);
+          },
+          tooltip: 'Aktualisieren',
+          icon: const Icon(Icons.refresh),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOverviewCard() {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final todayCount = _todayTotalCount;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: colors.primaryContainer,
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: colors.surface.withValues(
+                    alpha: 0.62,
+                  ),
+                  borderRadius:
+                  BorderRadius.circular(18),
+                ),
+                child: Icon(
+                  todayCount == 0
+                      ? Icons.check_circle_outline
+                      : Icons.auto_awesome_outlined,
+                  color: colors.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment:
+                  CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      todayCount == 0
+                          ? 'Heute ist alles ruhig'
+                          : '$todayCount Dinge für heute',
+                      style: theme.textTheme.titleLarge
+                          ?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color:
+                        colors.onPrimaryContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      todayCount == 0
+                          ? 'Keine Termine oder Aufgaben fällig.'
+                          : 'Termine, Aufgaben und Routinen auf einen Blick.',
+                      style: theme.textTheme.bodyMedium
+                          ?.copyWith(
+                        color: colors.onPrimaryContainer
+                            .withValues(alpha: 0.8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: _buildOverviewStat(
+                  icon: Icons.event_outlined,
+                  value:
+                  '${_events.where((event) => _sameDay(event.start, DateTime.now()) && event.visibility != PlannerVisibility.privateHidden).length}',
+                  label: 'Termine',
+                ),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: _buildOverviewStat(
+                  icon: Icons.task_alt_outlined,
+                  value:
+                  '${_todaySingleTasks.length + _dueRoutines.length}',
+                  label: 'Aufgaben',
+                ),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: _buildOverviewStat(
+                  icon:
+                  Icons.shopping_cart_outlined,
+                  value: '$_openShoppingItemCount',
+                  label: 'Einkauf',
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverviewStat({
+    required IconData icon,
+    required String value,
+    required String label,
+  }) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 12,
+      ),
+      decoration: BoxDecoration(
+        color: colors.surface.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            icon,
+            size: 19,
+            color: colors.onPrimaryContainer,
+          ),
+          const SizedBox(height: 5),
+          Text(
+            value,
+            style: theme.textTheme.titleMedium
+                ?.copyWith(
+              fontWeight: FontWeight.w900,
+              color: colors.onPrimaryContainer,
+            ),
+          ),
+          Text(
+            label,
+            maxLines: 1,
+            style: theme.textTheme.bodySmall
+                ?.copyWith(
+              color: colors.onPrimaryContainer
+                  .withValues(alpha: 0.8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildQuickActions() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionTitle(
+          'Schnellzugriffe',
+          icon: Icons.bolt_outlined,
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: _QuickAction(
+                icon: Icons.shopping_cart_outlined,
+                label: 'Einkauf',
+                onTap: () => widget.onNavigate(1),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _QuickAction(
+                icon: Icons.calendar_month_outlined,
+                label: 'Planer',
+                onTap: () => widget.onNavigate(2),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _QuickAction(
+                icon: Icons.home_work_outlined,
+                label: 'Haushalt',
+                onTap: () => widget.onNavigate(3),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPlannerSection() {
+    final events = _upcomingEvents;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader(
+          title: 'Nächste Termine',
+          icon: Icons.calendar_month_outlined,
+          onTap: () => widget.onNavigate(2),
+        ),
+        const SizedBox(height: 10),
+        if (events.isEmpty)
+          _emptyCard(
+            icon: Icons.event_available_outlined,
+            text: 'Keine kommenden Termine.',
+          )
+        else
+          ...events.map(_buildEventCard),
+      ],
+    );
+  }
+
+  Widget _buildEventCard(PlannerEvent event) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    final displayTitle =
+    event.visibility == PlannerVisibility.privateBusy
+        ? 'Belegt'
+        : event.title;
+
+    final participantId =
+    event.participantIds.length == 1
+        ? event.participantIds.first
+        : 'gemeinsam';
+
+    final color = participantId == 'gemeinsam'
+        ? colors.tertiary
+        : _memberColor(participantId);
+
+    final dateText = _sameDay(
+      event.start,
+      DateTime.now(),
+    )
+        ? 'Heute'
+        : _formatShortDate(event.start);
+
+    final timeText = event.isAllDay
+        ? 'Ganztägig'
+        : '${_formatTime(event.start)} Uhr';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Material(
+        color: colors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(21),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(21),
+          onTap: () => widget.onNavigate(2),
+          child: Padding(
+            padding: const EdgeInsets.all(13),
+            child: Row(
+              children: [
+                Container(
+                  width: 6,
+                  height: 54,
+                  decoration: BoxDecoration(
+                    color: color,
+                    borderRadius:
+                    BorderRadius.circular(20),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        displayTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$dateText • $timeText',
+                        style: TextStyle(
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHouseholdSection() {
+    final tasks = [
+      ..._todaySingleTasks,
+      ..._dueRoutines,
+    ].take(4).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader(
+          title: 'Heute im Haushalt',
+          icon: Icons.home_work_outlined,
+          onTap: () => widget.onNavigate(3),
+        ),
+        const SizedBox(height: 10),
+        if (tasks.isEmpty)
+          _emptyCard(
+            icon: Icons.check_circle_outline,
+            text: 'Für heute ist nichts offen.',
+          )
+        else
+          ...tasks.map(_buildHouseholdTaskCard),
+      ],
+    );
+  }
+
+  Widget _buildHouseholdTaskCard(
+      HouseholdTask task,
+      ) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final isRoutine = task.recurrence !=
+        HouseholdTaskRecurrence.none;
+
+    final assigneeText = task.assigneeIds.isEmpty
+        ? 'Nicht zugewiesen'
+        : task.assigneeIds
+        .map(_assigneeName)
+        .join(', ');
+
+    final accentColor = task.assigneeIds.length == 1
+        ? _memberColor(task.assigneeIds.first)
+        : colors.tertiary;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Material(
+        color: colors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(21),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(21),
+          onTap: () => widget.onNavigate(3),
+          child: Padding(
+            padding: const EdgeInsets.all(13),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(
+                      alpha: 0.17,
+                    ),
+                    borderRadius:
+                    BorderRadius.circular(15),
+                  ),
+                  child: Icon(
+                    isRoutine
+                        ? Icons.repeat
+                        : Icons.task_alt_outlined,
+                    color: accentColor,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        task.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        isRoutine
+                            ? '$assigneeText • Routine'
+                            : assigneeText,
+                        style: TextStyle(
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (task.priority ==
+                    HouseholdTaskPriority.high)
+                  Icon(
+                    Icons.priority_high,
+                    color: colors.error,
+                  ),
+                const Icon(Icons.chevron_right),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShoppingSection() {
+    final lists = _activeShoppingLists;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sectionHeader(
+          title: 'Einkaufslisten',
+          icon: Icons.shopping_cart_outlined,
+          onTap: () => widget.onNavigate(1),
+        ),
+        const SizedBox(height: 10),
+        if (lists.isEmpty)
+          _emptyCard(
+            icon: Icons.shopping_cart_checkout,
+            text: 'Keine offenen Einkaufsartikel.',
+          )
+        else
+          ...lists.map(_buildShoppingListCard),
+      ],
+    );
+  }
+
+  Widget _buildShoppingListCard(
+      ShoppingList list,
+      ) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final openItems =
+    list.items.where((item) => !item.done).toList();
+
+    final preview = openItems
+        .take(3)
+        .map((item) => item.name)
+        .join(', ');
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Material(
+        color: colors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(21),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(21),
+          onTap: () => widget.onNavigate(1),
+          child: Padding(
+            padding: const EdgeInsets.all(13),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: colors.primaryContainer,
+                    borderRadius:
+                    BorderRadius.circular(15),
+                  ),
+                  child: const Icon(
+                    Icons.list_alt_outlined,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment:
+                    CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        list.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${openItems.length} offen'
+                            '${preview.isEmpty ? '' : ' • $preview'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionTitle(
+      String title, {
+        required IconData icon,
+      }) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Row(
+      children: [
+        Icon(
+          icon,
+          size: 21,
+          color: colors.primary,
+        ),
+        const SizedBox(width: 8),
+        Text(
+          title,
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _sectionHeader({
+    required String title,
+    required IconData icon,
+    required VoidCallback onTap,
+  }) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Row(
+      children: [
+        Icon(
+          icon,
+          size: 21,
+          color: colors.primary,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        TextButton(
+          onPressed: onTap,
+          child: const Text('Alle'),
+        ),
+      ],
+    );
+  }
+
+  Widget _emptyCard({
+    required IconData icon,
+    required String text,
+  }) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(19),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(21),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            icon,
+            color: colors.primary,
+          ),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Text(
+              text,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: colors.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
-class _QuickButton extends StatelessWidget {
-  const _QuickButton({
+class _QuickAction extends StatelessWidget {
+  const _QuickAction({
     required this.icon,
-    required this.text,
+    required this.label,
     required this.onTap,
   });
 
   final IconData icon;
-  final String text;
+  final String label;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+
+    return Material(
+      color: colors.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(21),
       child: InkWell(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(21),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.all(10),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 16,
+          ),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 34),
-              const SizedBox(height: 10),
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: colors.primaryContainer,
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Icon(
+                  icon,
+                  color: colors.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(height: 9),
               Text(
-                text,
+                label,
+                maxLines: 1,
                 textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
               ),
             ],
           ),
